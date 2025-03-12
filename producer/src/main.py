@@ -2,8 +2,8 @@
 Main entry point for the web scraper producer.
 """
 
-from src.scraper import Scraper
-from src.queue_manager import QueueManager
+from scraper import scrape  # Import the standalone scrape function
+from queue_manager import QueueManager
 
 
 def run_scraper(queue_manager):
@@ -13,7 +13,7 @@ def run_scraper(queue_manager):
         scraper_config = {
             "targets": [
                 {
-                    "url": "https://example.com",
+                    "url": "",
                     "container_selector": "body",  # Or a more specific container
                     "fields": {
                         "links": {
@@ -39,8 +39,8 @@ def run_scraper(queue_manager):
             ]
         }
 
-        scraper = Scraper(scraper_config)
-        results = scraper.scrape()
+        # Call the standalone scrape function
+        results = scrape(scraper_config)
         if results:
             print(f"Scraped {len(results)} items")
 
