@@ -1,8 +1,6 @@
 """
 Main entry point for the web scraper producer.
 """
-import time
-import schedule
 from src.scraper import Scraper
 from src.queue_manager import QueueManager
 
@@ -16,11 +14,20 @@ def run_scraper(queue_manager):
             'targets': [
                 {
                     'url': 'https://example.com',
-                    'container_selector': '.item-container',
+                    'container_selector': 'body',  # Or a more specific container
                     'fields': {
-                        'title': {'selector': 'h2.title'},
-                        'price': {'selector': '.price'},
-                        'description': {'selector': '.description'}
+                        'links': {
+                            'selector': 'a',  # Target all <a> tags
+                            'extract': ['href', 'text', 'title', 'aria-label', 'rel']  # Extract link attributes
+                        },
+                        'context': {
+                            'selector': 'p, h1, h2, h3, li',  # Extract surrounding text
+                            'extract': 'text'
+                        },
+                        'metadata': {
+                            'selector': 'meta',  # Extract meta tags (e.g., description, keywords)
+                            'extract': ['name', 'content']
+                        }
                     }
                 }
             ]
@@ -60,16 +67,16 @@ def main():
     print("Queue manager initialized")
     
     # Run scraper every 60 minutes
-    schedule.every(60).minutes.do(run_scraper, queue_manager=queue_manager)
+    # schedule.every(60).minutes.do(run_scraper, queue_manager=queue_manager)
     
     # Run once at startup
     print("Running initial scraping job at startup")
     run_scraper(queue_manager)
     
     # Keep the script running
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+    # while True:
+    #     schedule.run_pending()
+    #     time.sleep(1)
 
 if __name__ == "__main__":
     main()
