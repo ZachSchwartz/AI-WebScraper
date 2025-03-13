@@ -6,14 +6,15 @@ from scraper import scrape  # Import the standalone scrape function
 from queue_manager import QueueManager
 
 
-def run_scraper(queue_manager):
+def run_scraper(queue_manager, url, keyword):
     """Run the scraper and publish results to the queue."""
     try:
         print("Starting scraping job")
         scraper_config = {
             "targets": [
                 {
-                    "url": "",
+                    "url": url,
+                    "keyword": keyword,
                     "container_selector": "body",  # Or a more specific container
                     "fields": {
                         "links": {
@@ -56,7 +57,7 @@ def run_scraper(queue_manager):
         print(f"Error in scraping job: {str(e)}")
 
 
-def main():
+def main(url, keyword):
     """Main entry point for the scraper."""
 
     queue_config = {
@@ -69,7 +70,7 @@ def main():
     queue_manager = QueueManager(queue_config)
     print("Queue manager initialized")
 
-    run_scraper(queue_manager)
+    run_scraper(queue_manager, url, keyword)
 
 
 if __name__ == "__main__":
