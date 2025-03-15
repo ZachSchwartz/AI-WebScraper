@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  producer:
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python src/main.py --url "https://example.com" --keyword "test"
+
+  # Example of running multiple producers with different parameters
+  producer_news:
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python src/main.py --url "https://news.example.com" --keyword "news"
+
+  producer_blog:
+    build:
+      context: ./producer
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: python src/main.py --url "https://blog.example.com" --keyword "blog"
+
+volumes:
+  redis_data: 
