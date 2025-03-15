@@ -5,7 +5,6 @@ LLM processor using flan-t5-large for text analysis and relevance scoring.
 from typing import Dict, Any, Tuple
 import torch
 from transformers import AutoTokenizer, T5ForConditionalGeneration
-from loguru import logger
 
 
 class LLMProcessor:
@@ -15,15 +14,15 @@ class LLMProcessor:
         """Initialize the LLM processor with flan-t5-large."""
         self.model_name = "google/flan-t5-large"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Using device: {self.device}")
+        print(f"Using device: {self.device}")
         
         # Load model and tokenizer
-        logger.info("Loading flan-t5-large model...")
+        print("Loading flan-t5-large model...")
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.model = T5ForConditionalGeneration.from_pretrained(
             self.model_name
         ).to(self.device)
-        logger.info("Model loaded successfully")
+        print("Model loaded successfully")
 
     def generate_relevance_score(self, text: str, keyword: str) -> Tuple[float, str]:
         """
@@ -95,7 +94,7 @@ class LLMProcessor:
             # Get the keyword from the item
             keyword = item.get("keyword", "")
             if not keyword:
-                logger.warning("No keyword found in item, skipping relevance scoring")
+                print("Warning: No keyword found in item, skipping relevance scoring")
                 return item
 
             # Collect all relevant text for scoring
@@ -135,9 +134,9 @@ class LLMProcessor:
                 "analyzed_text": combined_text
             }
 
-            logger.info(f"Generated relevance score {score:.2f} for URL: {item.get('href', 'unknown')}")
+            print(f"Generated relevance score {score:.2f} for URL: {item.get('href', 'unknown')}")
             return processed_item
 
         except Exception as e:
-            logger.error(f"Error processing item: {str(e)}")
+            print(f"Error processing item: {str(e)}")
             return item  # Return original item if processing fails 
