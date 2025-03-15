@@ -2,8 +2,10 @@
 Main entry point for the web scraper producer.
 """
 
+import argparse
 from scraper import scrape  # Import the standalone scrape function
 from queue_manager import QueueManager
+from read_queue import read_queue, display_items
 
 
 def run_scraper(queue_manager, url, keyword):
@@ -53,6 +55,14 @@ def run_scraper(queue_manager, url, keyword):
         else:
             print("No results found during scraping")
 
+        # Read and display the queue contents
+        print("\nReading queue contents:")
+        items = read_queue()
+        if items:
+            display_items(items)
+        else:
+            print("No items found in queue after scraping")
+
     except Exception as e:
         print(f"Error in scraping job: {str(e)}")
 
@@ -70,8 +80,16 @@ def main(url, keyword):
     queue_manager = QueueManager(queue_config)
     print("Queue manager initialized")
 
-    run_scraper(queue_manager, url, keyword)
+    try:
+        run_scraper(queue_manager, url, keyword)
+    finally:
+        queue_manager.close()
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='Web scraper producer')
+    parser.add_argument('--url', required=True, help='Target URL to scrape')
+    parser.add_argument('--keyword', required=True, help='Keyword to search for')
+    
+    args = parser.parse_args()
+    main(args.url, args.keyword)

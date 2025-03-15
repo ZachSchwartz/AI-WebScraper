@@ -33,6 +33,7 @@ class QueueManager:
     def _connect(self) -> None:
         """Establish connection to Redis."""
         try:
+            print(f"Attempting to connect to Redis at {self.host}:{self.port}")
             self.redis_client = redis.Redis(
                 host=self.host,
                 port=self.port,
@@ -41,7 +42,7 @@ class QueueManager:
             )
             # Test connection
             self.redis_client.ping()
-            print(f"Connected to Redis at {self.host}:{self.port}")
+            print(f"Successfully connected to Redis at {self.host}:{self.port}")
         except redis.RedisError as e:
             print(f"Failed to connect to Redis: {str(e)}")
             raise
