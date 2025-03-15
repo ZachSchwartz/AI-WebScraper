@@ -1,0 +1,17 @@
+# Queue
+redis==5.0.1
+
+# Machine Learning
+transformers==4.38.2
+torch==2.2.1
+accelerate==0.27.2
+bitsandbytes==0.42.0
+sentencepiece==0.2.0
+
+# Utilities
+python-dotenv==1.0.1
+loguru==0.7.2
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.23.5 

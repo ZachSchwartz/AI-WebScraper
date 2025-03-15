@@ -16,7 +16,22 @@ services:
       - redis
     environment:
       - PYTHONUNBUFFERED=1
-    command: python src/main.py --url "https://example.com" --keyword "test"
+
+  llm:
+    build:
+      context: ./LLM
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # Example of running multiple producers with different parameters
   producer_news:
