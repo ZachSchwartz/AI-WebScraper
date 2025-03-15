@@ -3,11 +3,15 @@ Main entry point for the LLM processor.
 """
 
 import os
+import sys
 import argparse
 from loguru import logger
 from llm_processor import LLMProcessor
-from queue_consumer import QueueConsumer
-from producer.src.read_queue import read_queue
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from queue_manager import QueueManager
+from read_queue import read_queue
 
 
 def main():
@@ -19,38 +23,39 @@ def main():
 
     # Configure Redis connection
     redis_config = {
+        "type": "redis",
         "host": os.getenv("REDIS_HOST", "redis"),
         "port": int(os.getenv("REDIS_PORT", 6379)),
         "queue_name": "scraped_items"
     }
 
     # Initialize Redis connection
-    consumer = QueueConsumer(redis_config)
+    queue_manager = QueueManager(redis_config)
 
     try:
         if args.read_only:
             # Just read and display queue contents
             logger.info("\nDisplaying processed items:")
             read_queue(
-                redis_client=consumer.redis_client,
-                queue_name=consumer.processed_queue_name
+                redis_client=queue_manager.redis_client,
+                queue_name=queue_manager.processed_queue_name
             )
         else:
             # Full processing mode
             processor = LLMProcessor()
-            consumer.process_queue(processor.process_item)
+            queue_manager.process_queue(processor.process_item)
             
             # Display processed items
             logger.info("\nDisplaying processed items:")
             read_queue(
-                redis_client=consumer.redis_client,
-                queue_name=consumer.processed_queue_name
+                redis_client=queue_manager.redis_client,
+                queue_name=queue_manager.processed_queue_name
             )
             
     except KeyboardInterrupt:
         logger.info("Shutting down")
     finally:
-        consumer.close()
+        queue_manager.close()
 
 
 if __name__ == "__main__":

@@ -9,14 +9,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
-COPY requirements.txt /app/
+COPY LLM/requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the source code
-COPY src/ /app/src/
-
-# Set Python path
+# Set Python path to include app directory
 ENV PYTHONPATH=/app
 
-# Default command (can be overridden)
-CMD ["python", "src/main.py"] 
+# Note: Source code will be mounted as a volume in docker-compose.yml
+# CMD is set in docker-compose or when running the container

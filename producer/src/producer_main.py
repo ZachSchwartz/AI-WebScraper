@@ -4,8 +4,10 @@ Main entry point for the web scraper producer.
 
 import argparse
 from scraper import scrape  # Import the standalone scrape function
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from queue_manager import QueueManager
-from read_queue import read_queue, display_items
 
 
 def run_scraper(queue_manager, url, keyword):
@@ -55,14 +57,6 @@ def run_scraper(queue_manager, url, keyword):
             print(f"Published {len(results)} items to queue")
         else:
             print("No results found during scraping")
-
-        # Read and display the queue contents
-        print("\nReading queue contents:")
-        items = read_queue()
-        if items:
-            display_items(items)
-        else:
-            print("No items found in queue after scraping")
 
     except Exception as e:
         print(f"Error in scraping job: {str(e)}")
