@@ -17,6 +17,7 @@ def run_scraper(queue_manager, url, keyword):
                 {
                     "url": url,
                     "keyword": keyword,
+                    "score": "",
                     "container_selector": "body",  # Or a more specific container
                     "fields": {
                         "links": {
@@ -90,6 +91,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Web scraper producer')
     parser.add_argument('--url', required=True, help='Target URL to scrape')
     parser.add_argument('--keyword', required=True, help='Keyword to search for')
-    
+
     args = parser.parse_args()
     main(args.url, args.keyword)

@@ -2,46 +2,56 @@
 Main entry point for the LLM processor.
 """
 
+import os
 import argparse
-from queue_consumer import QueueConsumer
-from llm_processor import LLMProcessor
 from loguru import logger
+from llm_processor import LLMProcessor
+from queue_consumer import QueueConsumer
+from producer.src.read_queue import read_queue
 
 
-def main(model_name: str):
-    """
-    Main entry point for the LLM processor.
+def main():
+    """Initialize and run the LLM processor."""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="LLM Processor")
+    parser.add_argument("--read-only", action="store_true", help="Only read and display queue contents")
+    args = parser.parse_args()
 
-    Args:
-        model_name: Name of the Hugging Face model to use
-    """
-    # Initialize queue consumer
-    queue_config = {
-        "host": "redis",
-        "port": 6379,
-        "queue_name": "scraped_items",
-        "batch_size": 10,
-        "wait_time": 5
+    # Configure Redis connection
+    redis_config = {
+        "host": os.getenv("REDIS_HOST", "redis"),
+        "port": int(os.getenv("REDIS_PORT", 6379)),
+        "queue_name": "scraped_items"
     }
-    consumer = QueueConsumer(queue_config)
-    logger.info("Queue consumer initialized")
 
-    # Initialize LLM processor
-    processor = LLMProcessor(model_name)
-    logger.info("LLM processor initialized")
+    # Initialize Redis connection
+    consumer = QueueConsumer(redis_config)
 
-    # Start processing queue
-    logger.info("Starting queue processing")
-    consumer.process_queue(processor.process_item)
+    try:
+        if args.read_only:
+            # Just read and display queue contents
+            logger.info("\nDisplaying processed items:")
+            read_queue(
+                redis_client=consumer.redis_client,
+                queue_name=consumer.processed_queue_name
+            )
+        else:
+            # Full processing mode
+            processor = LLMProcessor()
+            consumer.process_queue(processor.process_item)
+            
+            # Display processed items
+            logger.info("\nDisplaying processed items:")
+            read_queue(
+                redis_client=consumer.redis_client,
+                queue_name=consumer.processed_queue_name
+            )
+            
+    except KeyboardInterrupt:
+        logger.info("Shutting down")
+    finally:
+        consumer.close()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="LLM processor for scraped content")
-    parser.add_argument(
-        "--model",
-        default="distilbert-base-uncased",
-        help="Name of the Hugging Face model to use"
-    )
-    
-    args = parser.parse_args()
-    main(args.model) 
+    main() 

@@ -6,8 +6,8 @@ import time
 import random
 import logging
 from typing import Dict, List, Any, Optional
-import requests
 from urllib.robotparser import RobotFileParser
+import requests
 from bs4 import BeautifulSoup
 
 # Configure logging
