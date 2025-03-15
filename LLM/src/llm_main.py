@@ -11,8 +11,6 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from queue_manager import QueueManager
-from read_queue import read_queue
-
 
 def main():
     """Initialize and run the LLM processor."""
@@ -36,10 +34,7 @@ def main():
         if args.read_only:
             # Just read and display queue contents
             logger.info("\nDisplaying processed items:")
-            read_queue(
-                redis_client=queue_manager.redis_client,
-                queue_name=queue_manager.processed_queue_name
-            )
+            queue_manager.read_queue(queue_manager.processed_queue_name)
         else:
             # Full processing mode
             processor = LLMProcessor()
@@ -47,10 +42,7 @@ def main():
             
             # Display processed items
             logger.info("\nDisplaying processed items:")
-            read_queue(
-                redis_client=queue_manager.redis_client,
-                queue_name=queue_manager.processed_queue_name
-            )
+            queue_manager.read_queue(queue_manager.processed_queue_name)
             
     except KeyboardInterrupt:
         logger.info("Shutting down")

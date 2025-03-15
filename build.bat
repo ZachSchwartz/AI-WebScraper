@@ -20,7 +20,7 @@ docker compose up -d --no-deps %REBUILD% redis llm
 echo 🕷️ Running scraper and processing...
 echo URL: %URL%
 echo Keyword: %KEYWORD%
-start /B cmd /c "docker compose run --rm producer python src/main.py --url "%URL%" --keyword "%KEYWORD%""
+start /B cmd /c "docker compose run --rm --workdir /app producer python src/main.py --url "%URL%" --keyword "%KEYWORD%""
 start /B cmd /c "timeout /t 20 /nobreak && docker compose exec llm python src/main.py --read-only"
 
 endlocal

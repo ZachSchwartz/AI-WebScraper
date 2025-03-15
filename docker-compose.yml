@@ -17,7 +17,6 @@ services:
       - PYTHONUNBUFFERED=1
     volumes:
       - ./producer/src:/app/src
-      - ./read_queue.py:/app/read_queue.py
 
   llm:
     build:
@@ -29,7 +28,6 @@ services:
       - PYTHONUNBUFFERED=1
     volumes:
       - ./LLM/src:/app/src
-      - ./read_queue.py:/app/read_queue.py
     deploy:
       resources:
         reservations:

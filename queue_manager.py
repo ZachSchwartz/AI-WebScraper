@@ -220,4 +220,90 @@ class QueueManager:
         """Close connections to Redis."""
         if self.redis_client:
             self.redis_client.close()
-            print("Redis connection closed") 
+            print("Redis connection closed")
+
+    def _format_dict(self, d: Dict[str, Any], indent: int = 0) -> None:
+        """Format and print a dictionary with proper indentation."""
+        for key, value in d.items():
+            indent_str = "  " * indent
+            if key == "relevance_analysis" and isinstance(value, dict):
+                # Highlight relevance analysis section
+                print(f"{indent_str}{key}:")
+                print(f"{indent_str}  {'='*40}")
+                for k, v in value.items():
+                    if k == "score":
+                        # Highlight the score with special formatting
+                        print(f"{indent_str}  {k}: {'*'*20} {v} {'*'*20}")
+                    else:
+                        print(f"{indent_str}  {k}: {v}")
+                print(f"{indent_str}  {'='*40}")
+            elif isinstance(value, dict):
+                print(f"{indent_str}{key}:")
+                self._format_dict(value, indent + 1)
+            elif isinstance(value, list):
+                print(f"{indent_str}{key}:")
+                for item in value:
+                    if isinstance(item, dict):
+                        self._format_dict(item, indent + 1)
+                    else:
+                        print(f"{indent_str}  - {item}")
+            else:
+                print(f"{indent_str}{key}: {value}")
+
+    def read_queue(self, queue_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Read and display items from a Redis queue.
+        
+        Args:
+            queue_name: Name of the queue to read from. If None, uses self.queue_name
+        
+        Returns:
+            List of items read from the queue
+        """
+        try:
+            queue_name = queue_name or self.queue_name
+            
+            # Get queue length
+            queue_length = self.redis_client.llen(queue_name)
+            print(f"\nFound {queue_length} items in queue '{queue_name}'")
+            print("=" * 80)
+            
+            display_count = queue_length
+            items = []
+            scores = []  # Track scores for summary
+            
+            # Read and display items
+            for i in range(display_count):
+                item_json = self.redis_client.lindex(queue_name, i)
+                if item_json:
+                    try:
+                        item = json.loads(item_json)
+                        items.append(item)
+                        
+                        # Extract score if available
+                        if "relevance_analysis" in item and "score" in item["relevance_analysis"]:
+                            scores.append(item["relevance_analysis"]["score"])
+                        
+                        print(f"\nItem {i + 1}/{display_count}:")
+                        print("=" * 80)
+                        self._format_dict(item)
+                        print("=" * 80)
+                    except json.JSONDecodeError as e:
+                        print(f"Error decoding item {i}: {e}")
+                        print(f"Raw content: {item_json}")
+            
+            # Display score summary if we have scores
+            if scores:
+                print("\nScore Summary:")
+                print("=" * 40)
+                for i, score in enumerate(scores, 1):
+                    print(f"Item {i}: {score}")
+                avg_score = sum(scores) / len(scores)
+                print(f"Average Score: {avg_score:.3f}")
+                print("=" * 40)
+            
+            return items
+                
+        except Exception as e:
+            print(f"Error reading queue: {e}")
+            return [] 
