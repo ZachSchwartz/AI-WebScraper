@@ -12,15 +12,22 @@ if "%KEYWORD%"=="" set "KEYWORD=python"
 set "BUILD="
 if "%3"=="--build" set "BUILD=--build"
 
-:: Start services (only build if explicitly requested)
-echo 🚀 Starting services...
-docker compose up -d --no-deps %BUILD% redis llm
+:: Start Redis only
+echo 🚀 Starting Redis...
+docker compose up -d --no-deps %BUILD% redis
 
-:: Run scraper and display results in parallel
-echo 🕷️ Running scraper and processing...
+:: Run the producer first
+echo 🕷️ Running scraper...
 echo URL: %URL%
 echo Keyword: %KEYWORD%
 docker compose run --rm -e URL="%URL%" -e KEYWORD="%KEYWORD%" producer
-start /B cmd /c "timeout /t 20 /nobreak && docker compose exec llm python src/main.py --read-only"
+
+:: Run LLM processor as its own container that will exit when done
+echo 🧠 Starting LLM processor to process results...
+docker compose run --rm llm python src/llm_main.py
+
+:: Stop all services
+echo Stopping services...
+docker compose down
 
 endlocal

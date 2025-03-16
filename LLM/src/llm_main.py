@@ -4,7 +4,6 @@ Main entry point for the LLM processor.
 
 import os
 import sys
-import argparse
 from llm_processor import LLMProcessor
 import sys
 import os
@@ -13,10 +12,6 @@ from queue_manager import QueueManager
 
 def main():
     """Initialize and run the LLM processor."""
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="LLM Processor")
-    parser.add_argument("--read-only", action="store_true", help="Only read and display queue contents")
-    args = parser.parse_args()
 
     # Configure Redis connection
     redis_config = {
@@ -29,24 +24,13 @@ def main():
     # Initialize Redis connection
     queue_manager = QueueManager(redis_config)
 
-    try:
-        if args.read_only:
-            # Just read and display queue contents
-            print("\nDisplaying processed items:")
-            queue_manager.read_queue(queue_manager.processed_queue_name)
-        else:
-            # Full processing mode
-            processor = LLMProcessor()
-            queue_manager.process_queue(processor.process_item)
-            
-            # Display processed items
-            print("\nDisplaying processed items:")
-            queue_manager.read_queue(queue_manager.processed_queue_name)
-            
-    except KeyboardInterrupt:
-        print("Shutting down")
-    finally:
-        queue_manager.close()
+
+    processor = LLMProcessor()
+    queue_manager.process_queue(processor.process_item)
+    
+    # Display processed items
+    print("\nDisplaying processed items:")
+   # queue_manager.read_queue(queue_manager.processed_queue_name)
 
 
 if __name__ == "__main__":

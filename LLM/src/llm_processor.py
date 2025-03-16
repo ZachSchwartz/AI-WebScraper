@@ -6,21 +6,25 @@ from typing import Dict, Any, Tuple
 import torch
 from transformers import AutoTokenizer, T5ForConditionalGeneration
 
-
 class LLMProcessor:
     """Processes text content using flan-t5-large model."""
 
     def __init__(self):
         """Initialize the LLM processor with flan-t5-large."""
         self.model_name = "google/flan-t5-large"
+        self.cache_dir = "./model_cache"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
         
         # Load model and tokenizer
         print("Loading flan-t5-large model...")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name, 
+            cache_dir=self.cache_dir
+        )
         self.model = T5ForConditionalGeneration.from_pretrained(
-            self.model_name
+            self.model_name,
+            cache_dir=self.cache_dir
         ).to(self.device)
         print("Model loaded successfully")
 
