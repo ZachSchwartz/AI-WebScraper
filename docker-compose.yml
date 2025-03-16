@@ -17,6 +17,8 @@ services:
       - PYTHONUNBUFFERED=1
     volumes:
       - ./producer/src:/app/src
+      - ./queue_manager.py:/app/queue_manager.py
+    command: python src/producer_main.py --url "https://example.com" --keyword "python"
 
   llm:
     build:

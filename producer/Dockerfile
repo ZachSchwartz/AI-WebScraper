@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
 COPY producer/requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy queue_manager.py from root directory
+COPY queue_manager.py /app/
+
 # Set Python path to include app directory
 ENV PYTHONPATH=/app
 

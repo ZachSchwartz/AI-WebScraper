@@ -6,7 +6,11 @@ import argparse
 from scraper import scrape  # Import the standalone scrape function
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+# Add the root directory to Python path to find queue_manager
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(root_dir)
+
 from queue_manager import QueueManager
 
 
@@ -82,9 +86,17 @@ def main(url, keyword):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Web scraper producer')
-    parser.add_argument('--url', required=True, help='Target URL to scrape')
-    parser.add_argument('--keyword', required=True, help='Keyword to search for')
+    # Try to get URL and keyword from environment variables first
+    url = os.environ.get('URL')
+    keyword = os.environ.get('KEYWORD')
 
-    args = parser.parse_args()
-    main(args.url, args.keyword)
+    # If not in environment, try command line arguments
+    if not url or not keyword:
+        parser = argparse.ArgumentParser(description='Web scraper producer')
+        parser.add_argument('--url', required=True, help='Target URL to scrape')
+        parser.add_argument('--keyword', required=True, help='Keyword to search for')
+        args = parser.parse_args()
+        url = args.url
+        keyword = args.keyword
+
+    main(url, keyword)

@@ -5,7 +5,6 @@ Main entry point for the LLM processor.
 import os
 import sys
 import argparse
-from loguru import logger
 from llm_processor import LLMProcessor
 import sys
 import os
@@ -33,7 +32,7 @@ def main():
     try:
         if args.read_only:
             # Just read and display queue contents
-            logger.info("\nDisplaying processed items:")
+            print("\nDisplaying processed items:")
             queue_manager.read_queue(queue_manager.processed_queue_name)
         else:
             # Full processing mode
@@ -41,11 +40,11 @@ def main():
             queue_manager.process_queue(processor.process_item)
             
             # Display processed items
-            logger.info("\nDisplaying processed items:")
+            print("\nDisplaying processed items:")
             queue_manager.read_queue(queue_manager.processed_queue_name)
             
     except KeyboardInterrupt:
-        logger.info("Shutting down")
+        print("Shutting down")
     finally:
         queue_manager.close()
 
