@@ -7,6 +7,8 @@ transformers==4.38.2
 torch==2.2.1
 accelerate==0.27.2
 sentencepiece==0.2.0  # Required for T5 tokenizer
+huggingface_hub>=0.19.3  # Updated to be compatible with transformers 4.38.2
+sentence-transformers>=2.2.2  # Added for semantic similarity
 
 # Utilities
 python-dotenv==1.0.1

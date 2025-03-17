@@ -30,7 +30,7 @@ def main():
     
     # Display processed items
     print("\nDisplaying processed items:")
-   # queue_manager.read_queue(queue_manager.processed_queue_name)
+    queue_manager.read_queue(queue_manager.processed_queue_name)
 
 
 if __name__ == "__main__":
