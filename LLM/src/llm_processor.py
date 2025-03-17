@@ -89,7 +89,7 @@ class LLMProcessor:
         """
         Generate a relevance score between 0 and 1 for the text relative to the keyword.
         Uses semantic analysis with sentence transformers and intelligent scoring.
-        Provides nuanced scoring to better rank links by relevance.
+        The scoring is polarized - tending towards 0 for irrelevant content and 1 for highly relevant content.
 
         Args:
             text: Text to analyze
@@ -113,9 +113,9 @@ class LLMProcessor:
         # Calculate semantic similarity
         semantic_sim = util.cos_sim(text_embedding, keyword_embedding).item()
 
-        # Normalize semantic similarity to 0-1 range with moderate polarization
-        # Using a gentler sigmoid curve (steepness of 4)
-        semantic_score = 1 / (1 + np.exp(-4 * semantic_sim))
+        # Normalize semantic similarity to 0-1 range with more aggressive polarization
+        # Using a steeper sigmoid curve (increased from 5 to 8)
+        semantic_score = 1 / (1 + np.exp(-8 * semantic_sim))
 
         # 3. Context analysis with increased weight for exact matches
         context_score = 0.0
@@ -133,26 +133,25 @@ class LLMProcessor:
                     context_text = " ".join(context_words)
                     context_embedding = self._get_embedding(context_text)
 
-                    # Calculate context relevance with moderate curve
+                    # Calculate context relevance with steeper curve
                     context_sim = util.cos_sim(
                         context_embedding, keyword_embedding
                     ).item()
-                    context_score = 1 / (1 + np.exp(-4 * context_sim))
+                    context_score = 1 / (1 + np.exp(-8 * context_sim))
 
-        # Combine scores with balanced weighting
-        # Exact match (0.4), semantic similarity (0.4), context (0.2)
-        score = 0.4 * exact_match + 0.4 * semantic_score + 0.2 * context_score
+        # Combine scores with more polarized weighting
+        # Exact match gets even higher weight (0.5), semantic similarity (0.3), context (0.2)
+        score = 0.5 * exact_match + 0.3 * semantic_score + 0.2 * context_score
 
-        # Apply a moderate sigmoid transformation to maintain some polarization
-        # while allowing for nuanced scores
-        score = 1 / (1 + np.exp(-6 * (score - 0.5)))
+        # Apply a more aggressive sigmoid transformation to make scores more polarized
+        # Increased steepness from 5 to 10 and shifted threshold to 0.6
+        score = 1 / (1 + np.exp(-10 * (score - 0.6)))
 
-        # Add soft thresholds to maintain some nuance while still filtering
-        # very low relevance content
-        if score < 0.2:
-            score = 0.0
-        elif score > 0.9:
+        # Add a final threshold to push scores even more towards extremes
+        if score > 0.7:
             score = 1.0
+        elif score < 0.3:
+            score = 0.0
 
         return score
 
