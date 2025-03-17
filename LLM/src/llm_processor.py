@@ -3,13 +3,12 @@ Relevance processor using sentence transformers for fast text analysis and relev
 with improved caching to prevent repeated downloads.
 """
 
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Dict, Any, Tuple, List
 import torch
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
 import os
 import hashlib
-import json
 import re
 from urllib.parse import urlparse
 
@@ -200,115 +199,15 @@ class LLMProcessor:
             Dictionary containing original data and processing results
         """
         try:
-            # Get the keyword from the item
+            # Get the keyword and pre-processed text
             keyword = item.get("keyword", "").lower()
-
-            # Collect all relevant text for scoring
-            text_parts = []
-            
-            # Add meaningful text content first
-            if item.get("text"):
-                text = item['text'].strip()
-                if text and text.lower() != "more information...":  # Skip generic link text
-                    text_parts.append(text)
-                    
-            if item.get("title"):
-                title = item['title'].strip()
-                if title:
-                    text_parts.append(title)
-            
-            # Add aria-label if it exists and is meaningful
-            if item.get("aria-label"):
-                aria = item['aria-label'].strip()
-                if aria and aria.lower() != "more information...":  # Skip generic aria labels
-                    text_parts.append(aria)
-            
-            # Add rel attribute if it provides meaningful context
-            if item.get("rel"):
-                rel = item['rel']
-                if isinstance(rel, list):
-                    rel = " ".join(rel)
-                if rel and rel.lower() not in ["nofollow", "noopener"]:  # Skip common generic rel values
-                    text_parts.append(rel)
-            
-            # Add metadata information
-            if item.get("metadata"):
-                metadata = item["metadata"]
-                if metadata.get("title"):
-                    page_title = metadata["title"].strip()
-                    if page_title:
-                        text_parts.append(page_title)
-                
-                if metadata.get("description"):
-                    desc = metadata['description'].strip()
-                    if desc and len(desc) > 10:  # Only add if it's not too short
-                        if len(desc) > 300:  # Truncate very long descriptions
-                            desc = desc[:300] + "..."
-                        text_parts.append(desc)
-            
-            # Process URLs and domains efficiently
-            processed_domains = set()  # Track processed domains to avoid duplicates
-            
-            def process_url(url_str: str) -> List[str]:
-                """Process a URL and return meaningful components."""
-                if not url_str:
-                    return []
-                
-                parsed = urlparse(url_str)
-                components = []
-                
-                # Process domain
-                if parsed.netloc:
-                    domain = parsed.netloc.lower()
-                    # Remove common prefixes and suffixes
-                    domain = domain.replace('www.', '').replace('.com', '').replace('.org', '')
-                    if domain and domain not in processed_domains:
-                        components.append(domain)
-                        processed_domains.add(domain)
-                
-                # Process path
-                if parsed.path:
-                    path = parsed.path.strip('/')
-                    if path:
-                        # Split path into meaningful words, handling both slashes and hyphens
-                        path_words = [word for word in re.split(r'[/-]', path) if word]
-                        # Filter out common generic terms
-                        path_words = [word for word in path_words 
-                                    if word.lower() not in {'index', 'home', 'page', 'default'}]
-                        components.extend(path_words)
-                
-                return components
-            
-            # Process source URL
-            if item.get("source_url"):
-                text_parts.extend(process_url(item["source_url"]))
-            
-            # Process target URL
-            if item.get("href"):
-                text_parts.extend(process_url(item["href"]))
-            
-            # Add surrounding context if available
-            if item.get("context"):
-                context = item["context"]
-                if context.get("previous_text"):
-                    text_parts.append(context["previous_text"])
-                if context.get("next_text"):
-                    text_parts.append(context["next_text"])
-                if context.get("heading_hierarchy"):
-                    text_parts.extend(context["heading_hierarchy"])
-
-            # Remove duplicates while preserving order
-            text_parts = list(dict.fromkeys(text_parts))
-            
-            # Combine all text for analysis
-            combined_text = " ".join(text_parts)
-            print(f"Combined text: {combined_text}")
+            processed_text = item.get("processed_text", "")
             
             # Generate relevance score
-            score, explanation = self.generate_relevance_score(combined_text, keyword)
+            score, explanation = self.generate_relevance_score(processed_text, keyword)
             
             # Extract potential keywords for additional context
-            extracted_keywords = self._extract_keywords(combined_text)
+            extracted_keywords = self._extract_keywords(processed_text)
 
             # Add results to item
             processed_item = item.copy()
@@ -318,7 +217,6 @@ class LLMProcessor:
                 "score": score,
                 "explanation": explanation,
                 "extracted_keywords": extracted_keywords,
-                "text_parts_used": text_parts,  # Add this for debugging
                 "source_url": item.get("source_url"),  # Add source URL for reference
                 "metadata_used": bool(item.get("metadata")),  # Track if metadata was used
                 "context_used": bool(item.get("context"))  # Track if context was used

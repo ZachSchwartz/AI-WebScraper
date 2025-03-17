@@ -5,8 +5,10 @@ Web scraper module for collecting data from target websites.
 import time
 import random
 import logging
-from typing import Dict, List, Any, Optional
+import re
+from typing import Dict, List, Any, Optional, Set
 from urllib.robotparser import RobotFileParser
+from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
@@ -55,18 +57,92 @@ def fetch_with_requests(
     return None
 
 
+def clean_text(text: str) -> Optional[str]:
+    """Clean and normalize text content."""
+    if not text:
+        return None
+    text = text.strip()
+    if text.lower() in {"more information...", "click here", "read more"}:
+        return None
+    return text
+
+
+def process_url(url_str: str, processed_domains: Set[str]) -> List[str]:
+    """Process a URL and return meaningful components."""
+    if not url_str:
+        return []
+
+    parsed = urlparse(url_str)
+    components = []
+
+    # Process domain
+    if parsed.netloc:
+        domain = parsed.netloc.lower()
+        # Remove common prefixes and suffixes
+        domain = domain.replace("www.", "").replace(".com", "").replace(".org", "")
+        if domain and domain not in processed_domains:
+            components.append(domain)
+            processed_domains.add(domain)
+
+    # Process path
+    if parsed.path:
+        path = parsed.path.strip("/")
+        if path:
+            # Split path into meaningful words, handling both slashes and hyphens
+            path_words = [word for word in re.split(r"[/-]", path) if word]
+            # Filter out common generic terms
+            path_words = [
+                word
+                for word in path_words
+                if word.lower() not in {"index", "home", "page", "default"}
+            ]
+            components.extend(path_words)
+
+    return components
+
+
 def extract_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract metadata from the page."""
+    """Extract and clean metadata from the page."""
     metadata = {}
     try:
-        metadata["title"] = soup.title.get_text(strip=True) if soup.title else None
+        if soup.title:
+            metadata["title"] = clean_text(soup.title.get_text())
+
         meta_description = soup.find("meta", attrs={"name": "description"})
-        metadata["description"] = (
-            meta_description.get("content") if meta_description else None
-        )
+        if meta_description and meta_description.get("content"):
+            desc = clean_text(meta_description.get("content"))
+            if desc and len(desc) > 10:  # Only add if it's not too short
+                if len(desc) > 300:  # Truncate very long descriptions
+                    desc = desc[:300] + "..."
+                metadata["description"] = desc
     except Exception as e:
         logger.warning("Error extracting metadata: %s", str(e))
     return metadata
+
+
+def extract_context(link: BeautifulSoup) -> Dict[str, Any]:
+    """Extract and clean surrounding context for a link."""
+    context = {}
+    try:
+        # Get previous text
+        prev_elem = link.find_previous(["p", "h1", "h2", "h3", "li"])
+        if prev_elem:
+            context["previous_text"] = clean_text(prev_elem.get_text())
+
+        # Get next text
+        next_elem = link.find_next(["p", "h1", "h2", "h3", "li"])
+        if next_elem:
+            context["next_text"] = clean_text(next_elem.get_text())
+
+        # Get heading hierarchy
+        headings = [
+            h.get_text(strip=True) for h in link.find_parents(["h1", "h2", "h3"])
+        ]
+        if headings:
+            context["heading_hierarchy"] = headings
+    except Exception as e:
+        logger.warning("Error extracting context: %s", str(e))
+    return context
 
 
 def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -77,40 +153,74 @@ def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, An
         metadata = extract_metadata(soup)
         container_selector = target_config.get("container_selector", "body")
         containers = soup.select(container_selector) if container_selector else [soup]
-        keyword = target_config.get("keyword", "")  # Get keyword from target_config
+        keyword = target_config.get("keyword", "")
+        processed_domains = set()
 
         for container in containers:
             for link in container.find_all("a"):
+                # Clean and process link attributes
+                href = link.get("href")
+                text = clean_text(link.get_text())
+                title = clean_text(link.get("title"))
+                aria_label = clean_text(link.get("aria-label"))
+
+                # Process rel attribute
+                rel = link.get("rel")
+                if rel:
+                    if isinstance(rel, list):
+                        rel = " ".join(rel)
+                    if rel.lower() in ["nofollow", "noopener"]:
+                        rel = None
+
+                # Extract context
+                context = extract_context(link)
+
+                # Process URLs
+                url_components = []
+                if href:
+                    url_components.extend(process_url(href, processed_domains))
+                if target_config.get("url"):
+                    url_components.extend(
+                        process_url(target_config["url"], processed_domains)
+                    )
+
+                # Combine all text components
+                text_parts = []
+                if text:
+                    text_parts.append(text)
+                if title:
+                    text_parts.append(title)
+                if aria_label:
+                    text_parts.append(aria_label)
+                if rel:
+                    text_parts.append(rel)
+                if metadata.get("title"):
+                    text_parts.append(metadata["title"])
+                if metadata.get("description"):
+                    text_parts.append(metadata["description"])
+                text_parts.extend(url_components)
+                if context.get("previous_text"):
+                    text_parts.append(context["previous_text"])
+                if context.get("next_text"):
+                    text_parts.append(context["next_text"])
+                if context.get("heading_hierarchy"):
+                    text_parts.extend(context["heading_hierarchy"])
+
+                # Remove duplicates while preserving order
+                text_parts = list(dict.fromkeys(text_parts))
+
                 link_data = {
-                    "href": link.get("href"),
-                    "keyword": keyword,  # Use keyword from target_config
-                    "text": link.get_text(strip=True),
-                    "title": link.get("title"),
-                    "aria-label": link.get("aria-label"),
-                    "rel": link.get("rel"),
-                    "context": {
-                        "previous_text": (
-                            link.find_previous(["p", "h1", "h2", "h3", "li"]).get_text(
-                                strip=True
-                            )
-                            if link.find_previous(["p", "h1", "h2", "h3", "li"])
-                            else None
-                        ),
-                        "next_text": (
-                            link.find_next(["p", "h1", "h2", "h3", "li"]).get_text(
-                                strip=True
-                            )
-                            if link.find_next(["p", "h1", "h2", "h3", "li"])
-                            else None
-                        ),
-                        "heading_hierarchy": [
-                            h.get_text(strip=True)
-                            for h in link.find_parents(["h1", "h2", "h3"])
-                        ],
-                    },
+                    "href": href,
+                    "keyword": keyword,
+                    "text": text,
+                    "title": title,
+                    "aria-label": aria_label,
+                    "rel": rel,
+                    "context": context,
                     "metadata": metadata,
                     "source_url": target_config.get("url", ""),
                     "scraped_at": int(time.time()),
+                    "processed_text": " ".join(text_parts),  # Add pre-processed text
                 }
                 results.append(link_data)
 
