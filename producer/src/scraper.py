@@ -53,8 +53,24 @@ def clean_text(text: str) -> Optional[str]:
     if not text:
         return None
     text = text.strip()
-    if text.lower() in {"more information...", "click here", "read more"}:
+    
+    # Filter out common unwanted messages
+    if text.lower() in {
+        "more information...",
+        "click here",
+        "read more"
+    }:
         return None
+        
+    # Filter JavaScript warning messages with flexible matching
+    text_lower = text.lower()
+    if any(phrase in text_lower for phrase in [
+        "javascript is not essential",
+        "turn javascript on",
+        "interaction with the content will be limited"
+    ]):
+        return None
+        
     return text
 
 
