@@ -23,7 +23,6 @@ def run_scraper(queue_manager, url, keyword):
                 {
                     "url": url,
                     "keyword": keyword,
-                    "score": "",
                     "container_selector": "body",  # Or a more specific container
                     "fields": {
                         "links": {
@@ -80,8 +79,12 @@ def main(url, keyword):
     print("Queue manager initialized")
 
     try:
+        # Clear queues before starting
+        queue_manager.clear_queues()
+        print(f"Scraping URL: {url} with keyword: {keyword} in main")
         run_scraper(queue_manager, url, keyword)
     finally:
+        queue_manager.read_queue()
         queue_manager.close()
 
 
@@ -98,5 +101,5 @@ if __name__ == "__main__":
         args = parser.parse_args()
         url = args.url
         keyword = args.keyword
-
+    print(f"Scraping URL: {url} with keyword: {keyword}")
     main(url, keyword)

@@ -120,64 +120,6 @@ class QueueManager:
             print(f"Error updating item in Redis: {str(e)}")
             return False
 
-    def read_processed_queue(self) -> List[Dict[str, Any]]:
-        """
-        Read all items from the processed queue without removing them.
-        Prints complete details of the first 5 items in a readable format.
-
-        Returns:
-            List of processed items
-        """
-        try:
-            # Get all items from the processed queue
-            items = []
-            queue_length = self.redis_client.llen(self.processed_queue_name)
-            
-            print(f"\nFound {queue_length} items in processed queue")
-            print("=" * 80)
-            
-            # Only display first 5 items
-            display_count = min(5, queue_length)
-            
-            for i in range(queue_length):
-                item_json = self.redis_client.lindex(self.processed_queue_name, i)
-                if item_json:
-                    item = json.loads(item_json)
-                    items.append(item)
-                    
-                    # Print complete item details for first 5 items
-                    if i < display_count:
-                        print(f"\nItem {i + 1}/{display_count}:")
-                        print("=" * 80)
-                        
-                        # Print the entire item in a formatted way
-                        def format_dict(d: Dict[str, Any], indent: int = 0) -> None:
-                            for key, value in d.items():
-                                indent_str = "  " * indent
-                                if isinstance(value, dict):
-                                    print(f"{indent_str}{key}:")
-                                    format_dict(value, indent + 1)
-                                elif isinstance(value, list):
-                                    print(f"{indent_str}{key}:")
-                                    for item in value:
-                                        if isinstance(item, dict):
-                                            format_dict(item, indent + 1)
-                                        else:
-                                            print(f"{indent_str}  - {item}")
-                                else:
-                                    print(f"{indent_str}{key}: {value}")
-                        
-                        format_dict(item)
-                        print("=" * 80)
-            
-            if queue_length > 5:
-                print(f"\nNote: Displayed first {display_count} items out of {queue_length} total items")
-            
-            return items
-        except Exception as e:
-            print(f"Error reading processed queue: {str(e)}")
-            return []
-
     def process_queue(self, processor: Callable[[Dict[str, Any]], Dict[str, Any]]) -> None:
         """
         Process items from the queue continuously.
@@ -206,7 +148,7 @@ class QueueManager:
                     if processed_count > 0:
                         print(f"Queue empty after processing {processed_count} items")
                         print("Reading processed queue:")
-                        self.read_processed_queue()
+                        self.read_queue()
                         break
                     else:
                         print(f"Queue empty, waiting {self.wait_time} seconds")
@@ -306,4 +248,20 @@ class QueueManager:
                 
         except Exception as e:
             print(f"Error reading queue: {e}")
-            return [] 
+            return []
+
+    def clear_queues(self) -> bool:
+        """
+        Clear both the main queue and processed queue.
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            self.redis_client.delete(self.queue_name)
+            self.redis_client.delete(self.processed_queue_name)
+            print("Successfully cleared both main and processed queues")
+            return True
+        except Exception as e:
+            print(f"Error clearing queues: {str(e)}")
+            return False 

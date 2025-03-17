@@ -77,11 +77,13 @@ def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, An
         metadata = extract_metadata(soup)
         container_selector = target_config.get("container_selector", "body")
         containers = soup.select(container_selector) if container_selector else [soup]
+        keyword = target_config.get("keyword", "")  # Get keyword from target_config
 
         for container in containers:
             for link in container.find_all("a"):
                 link_data = {
                     "href": link.get("href"),
+                    "keyword": keyword,  # Use keyword from target_config
                     "text": link.get_text(strip=True),
                     "title": link.get("title"),
                     "aria-label": link.get("aria-label"),

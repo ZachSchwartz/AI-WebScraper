@@ -30,6 +30,7 @@ services:
       - PYTHONUNBUFFERED=1
     volumes:
       - ./LLM/src:/app/src
+      - model_cache:/app/model_cache
     deploy:
       resources:
         reservations:
@@ -61,3 +62,4 @@ services:
 
 volumes:
   redis_data:
+  model_cache:

@@ -1,32 +1,69 @@
 """
-LLM processor using flan-t5-large for text analysis and relevance scoring.
+LLM processor using flan-t5-large for text analysis and relevance scoring
+with improved caching to prevent repeated downloads.
 """
 
 from typing import Dict, Any, Tuple
 import torch
 from transformers import AutoTokenizer, T5ForConditionalGeneration
+import os
+import shutil
 
 class LLMProcessor:
-    """Processes text content using flan-t5-large model."""
+    """Processes text content using flan-t5-large model with proper caching."""
 
     def __init__(self):
         """Initialize the LLM processor with flan-t5-large."""
         self.model_name = "google/flan-t5-large"
-        self.cache_dir = "./model_cache"
+        # Use a persistent volume mount path for model caching
+        self.cache_dir = os.path.abspath("/app/model_cache")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
         
-        # Load model and tokenizer
-        print("Loading flan-t5-large model...")
+        # Create cache directory if it doesn't exist
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # Check if model is already cached
+        model_path = os.path.join(self.cache_dir, "models--google--flan-t5-large")
+        if os.path.exists(model_path):
+            print(f"Found cached model at: {model_path}")
+            self._load_from_cache()
+        else:
+            print(f"Downloading model to cache: {self.cache_dir}")
+            self._download_and_cache()
+
+    def _load_from_cache(self):
+        """Load model and tokenizer from cache."""
         self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_name, 
-            cache_dir=self.cache_dir
+            self.model_name,
+            cache_dir=self.cache_dir,
+            local_files_only=True
         )
+        
         self.model = T5ForConditionalGeneration.from_pretrained(
             self.model_name,
-            cache_dir=self.cache_dir
+            cache_dir=self.cache_dir,
+            local_files_only=True
         ).to(self.device)
-        print("Model loaded successfully")
+        
+        print("Model loaded from cache successfully")
+
+    def _download_and_cache(self):
+        """Download and cache the model."""
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name,
+            cache_dir=self.cache_dir,
+            local_files_only=False
+        )
+        
+        self.model = T5ForConditionalGeneration.from_pretrained(
+            self.model_name,
+            cache_dir=self.cache_dir,
+            local_files_only=False
+        ).to(self.device)
+        
+        print("Model downloaded and cached successfully")
+        print(f"Model cached at: {self.cache_dir}")
 
     def generate_relevance_score(self, text: str, keyword: str) -> Tuple[float, str]:
         """
@@ -97,9 +134,6 @@ class LLMProcessor:
         try:
             # Get the keyword from the item
             keyword = item.get("keyword", "")
-            if not keyword:
-                print("Warning: No keyword found in item, skipping relevance scoring")
-                return item
 
             # Collect all relevant text for scoring
             text_parts = []
@@ -138,9 +172,9 @@ class LLMProcessor:
                 "analyzed_text": combined_text
             }
 
-            print(f"Generated relevance score {score:.2f} for URL: {item.get('href', 'unknown')}")
+            print(f"Generated relevance score {score:.2f} for URL: {item.get('href', 'unknown')} with keyword: {keyword}")
             return processed_item
 
         except Exception as e:
             print(f"Error processing item: {str(e)}")
-            return item  # Return original item if processing fails 
+            return item  # Return original item if processing fails
