@@ -3,26 +3,28 @@ Main entry point for the web scraper producer.
 """
 
 import argparse
-from scraper import scrape  # Import the standalone scrape function
-import sys
 import os
-
-# Add the root directory to Python path to find queue_manager
+import sys
+from typing import Optional
+import requests
+from scraper import scrape
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
-
 from queue_manager import QueueManager
 
 
-def run_scraper(queue_manager, url, keyword):
+
+def run_scraper(
+    queue_manager: QueueManager, target_url: str, target_keyword: str
+) -> None:
     """Run the scraper and publish results to the queue."""
     try:
         print("Starting scraping job")
         scraper_config = {
             "targets": [
                 {
-                    "url": url,
-                    "keyword": keyword,
+                    "url": target_url,
+                    "keyword": target_keyword,
                     "container_selector": "body",  # Or a more specific container
                     "fields": {
                         "links": {
@@ -61,13 +63,15 @@ def run_scraper(queue_manager, url, keyword):
         else:
             print("No results found during scraping")
 
-    except Exception as e:
+    except (requests.exceptions.RequestException, ValueError) as e:
         print(f"Error in scraping job: {str(e)}")
+    except Exception as e:
+        print(f"Unexpected error in scraping job: {str(e)}")
+        raise  # Re-raise unexpected exceptions
 
 
-def main(url, keyword):
+def main(target_url: str, target_keyword: str) -> None:
     """Main entry point for the scraper."""
-
     queue_config = {
         "type": "redis",
         "host": "redis",  # Docker service name
@@ -81,8 +85,8 @@ def main(url, keyword):
     try:
         # Clear queues before starting
         queue_manager.clear_queues()
-        print(f"Scraping URL: {url} with keyword: {keyword} in main")
-        run_scraper(queue_manager, url, keyword)
+        print(f"Scraping URL: {target_url} with keyword: {target_keyword} in main")
+        run_scraper(queue_manager, target_url, target_keyword)
     finally:
         queue_manager.read_queue()
         queue_manager.close()
@@ -90,16 +94,21 @@ def main(url, keyword):
 
 if __name__ == "__main__":
     # Try to get URL and keyword from environment variables first
-    url = os.environ.get('URL')
-    keyword = os.environ.get('KEYWORD')
+    url: Optional[str] = os.environ.get("URL")
+    keyword: Optional[str] = os.environ.get("KEYWORD")
 
     # If not in environment, try command line arguments
     if not url or not keyword:
-        parser = argparse.ArgumentParser(description='Web scraper producer')
-        parser.add_argument('--url', required=True, help='Target URL to scrape')
-        parser.add_argument('--keyword', required=True, help='Keyword to search for')
+        parser = argparse.ArgumentParser(description="Web scraper producer")
+        parser.add_argument("--url", required=True, help="Target URL to scrape")
+        parser.add_argument("--keyword", required=True, help="Keyword to search for")
         args = parser.parse_args()
         url = args.url
         keyword = args.keyword
+
+    if not url or not keyword:
+        print("Error: URL and keyword are required")
+        sys.exit(1)
+
     print(f"Scraping URL: {url} with keyword: {keyword}")
     main(url, keyword)
