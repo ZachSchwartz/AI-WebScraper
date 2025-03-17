@@ -5,10 +5,11 @@ WORKDIR /app
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
-COPY producer/requirements.txt /app/
+COPY LLM/requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy queue_manager.py from root directory

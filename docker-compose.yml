@@ -1,5 +1,4 @@
-version: '3.8'
-
+# docker-compose.yml
 services:
   redis:
     image: redis:latest
@@ -10,13 +9,35 @@ services:
 
   producer:
     build:
-      context: ./producer
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: producer/Dockerfile
     depends_on:
       - redis
     environment:
       - PYTHONUNBUFFERED=1
-    command: python src/main.py --url "https://example.com" --keyword "test"
+    volumes:
+      - ./producer/src:/app/src
+      - ./queue_manager.py:/app/queue_manager.py
+    command: python src/producer_main.py --url "https://example.com" --keyword "python"
+
+  llm:
+    build:
+      context: .
+      dockerfile: LLM/Dockerfile
+    depends_on:
+      - redis
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./LLM/src:/app/src
+      - model_cache:/app/model_cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # Example of running multiple producers with different parameters
   producer_news:
@@ -40,4 +61,5 @@ services:
     command: python src/main.py --url "https://blog.example.com" --keyword "blog"
 
 volumes:
-  redis_data: 
+  redis_data:
+  model_cache:
