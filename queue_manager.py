@@ -130,9 +130,11 @@ class QueueManager:
         """
         print("Starting queue processing")
         processed_count = 0
+        iteration_count = 0
+        max_iterations = getattr(self, 'max_iterations', 1000)  # Default to 1000 if not set
         
         try:
-            while True:
+            while iteration_count < max_iterations:
                 items = self.get_batch()
                 if items:
                     print(f"Processing batch of {len(items)} items")
@@ -141,9 +143,13 @@ class QueueManager:
                             # Process the item
                             processed_item = processor(item)
                             
-                            # Update the item in Redis
-                            if self.update_item(processed_item):
+                            # Only update the item if we're not processing from the processed queue
+                            if self.queue_name != self.processed_queue_name:
+                                if self.update_item(processed_item):
+                                    processed_count += 1
+                            else:
                                 processed_count += 1
+                                
                         except Exception as e:
                             print(f"Error processing item: {str(e)}")
                 else:
@@ -153,6 +159,12 @@ class QueueManager:
                     else:
                         print(f"Queue empty, waiting {self.wait_time} seconds")
                         time.sleep(self.wait_time)
+                
+                iteration_count += 1
+                
+            if iteration_count >= max_iterations:
+                print(f"Reached maximum iteration limit of {max_iterations}")
+                
         except KeyboardInterrupt:
             print("Stopping queue processing")
         finally:

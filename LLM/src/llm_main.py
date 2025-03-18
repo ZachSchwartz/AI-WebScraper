@@ -44,25 +44,25 @@ def main() -> None:
     print(f"Processed queue '{queue_manager.processed_queue_name}' length: {processed_queue_length}")
 
     # Display processed items
-    print("\nDisplaying processed items:")
-    processed_items = queue_manager.read_queue(queue_manager.processed_queue_name)
-    
-    if processed_items:
-        for item in processed_items:
-            if queue_manager.publish_item(item):
-                print(f"Successfully published item with relevance score: {item.get('relevance_analysis', {}).get('score', 'N/A')}")
-            else:
-                print("Failed to publish item")
-    else:
-        print("No processed items found in the queue. Trying a direct check...")
-        # Try a direct check of the queue
-        try:
-            for i in range(queue_manager.redis_client.llen(queue_manager.processed_queue_name)):
-                item_json = queue_manager.redis_client.lindex(queue_manager.processed_queue_name, i)
-                if item_json:
-                    print(f"Found raw item in processed queue: {item_json[:100]}...")
-        except Exception as e:
-            print(f"Error directly checking processed queue: {e}")
+    # print("\nDisplaying processed items:")
+    # processed_items = queue_manager.read_queue(queue_manager.processed_queue_name)
+    # print("processed_items: ", processed_items)
+    # if processed_items:
+    #     for item in processed_items:
+    #         if queue_manager.publish_item(item):
+    #             print(f"Successfully published item with relevance score: {item.get('relevance_analysis', {}).get('score', 'N/A')}")
+    #         else:
+    #             print("Failed to publish item")
+    # else:
+    #     print("No processed items found in the queue. Trying a direct check...")
+    #     # Try a direct check of the queue
+    #     try:
+    #         for i in range(queue_manager.redis_client.llen(queue_manager.processed_queue_name)):
+    #             item_json = queue_manager.redis_client.lindex(queue_manager.processed_queue_name, i)
+    #             if item_json:
+    #                 print(f"Found raw item in processed queue: {item_json[:100]}...")
+    #     except Exception as e:
+    #         print(f"Error directly checking processed queue: {e}")
 
 
 if __name__ == "__main__":
