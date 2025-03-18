@@ -6,6 +6,7 @@ from typing import Dict, Any
 import sqlalchemy as sa
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import QueuePool
 import json
 import os
 
@@ -35,28 +36,48 @@ class ScrapedItem(Base):
 class DatabaseProcessor:
     """Processes items from Redis queue and stores them in SQL database."""
     
+    _engine = None
+    _Session = None
+    
+    @classmethod
+    def get_engine(cls):
+        """Get or create the SQLAlchemy engine with connection pooling."""
+        if cls._engine is None:
+            # Get database connection details from environment variables
+            db_user = os.getenv("DB_USER", "postgres")
+            db_password = os.getenv("DB_PASSWORD", "postgres")
+            db_host = os.getenv("DB_HOST", "postgres")
+            db_port = os.getenv("DB_PORT", "5432")
+            db_name = os.getenv("DB_NAME", "scraper")
+            
+            # Create database URL
+            db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+            
+            # Create SQLAlchemy engine with connection pooling
+            cls._engine = sa.create_engine(
+                db_url,
+                poolclass=QueuePool,
+                pool_size=5,  # Number of permanent connections to keep
+                max_overflow=10,  # Number of additional connections to allow
+                pool_timeout=30,  # Seconds to wait before giving up on getting a connection
+                pool_recycle=1800,  # Recycle connections after 30 minutes
+                pool_pre_ping=True  # Enable connection health checks
+            )
+            
+            # Create tables if they don't exist
+            Base.metadata.create_all(cls._engine)
+            
+            # Create session factory
+            cls._Session = sessionmaker(bind=cls._engine)
+            
+            print(f"DatabaseProcessor initialized with connection to {db_host}")
+        
+        return cls._engine
+    
     def __init__(self):
-        """Initialize the database processor with SQLAlchemy connection."""
-        # Get database connection details from environment variables
-        db_user = os.getenv("DB_USER", "postgres")
-        db_password = os.getenv("DB_PASSWORD", "postgres")
-        db_host = os.getenv("DB_HOST", "postgres")
-        db_port = os.getenv("DB_PORT", "5432")
-        db_name = os.getenv("DB_NAME", "scraper")
-        
-        # Create database URL
-        db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-        
-        # Create SQLAlchemy engine
-        self.engine = sa.create_engine(db_url)
-        
-        # Create tables if they don't exist
-        Base.metadata.create_all(self.engine)
-        
-        # Create session factory
-        self.Session = sessionmaker(bind=self.engine)
-        
-        print(f"DatabaseProcessor initialized with connection to {db_host}")
+        """Initialize the database processor."""
+        self.engine = self.get_engine()
+        self.Session = self._Session
     
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -97,6 +118,7 @@ class DatabaseProcessor:
                 session.add(db_item)
                 session.commit()
                 print(f"Item from {url} saved to database with relevance score: {relevance_score}")
+                print(db_item)
             except Exception as e:
                 session.rollback()
                 print(f"Error saving item to database: {str(e)}")

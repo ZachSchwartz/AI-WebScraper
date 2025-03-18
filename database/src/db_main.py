@@ -20,9 +20,10 @@ def main() -> None:
     # Configure Redis connection
     redis_config = {
         "type": "redis",
-        "host": os.getenv("REDIS_HOST", "redis"),
-        "port": int(os.getenv("REDIS_PORT", "6379")),
-        "queue_name": "scraped_items_processed",  # Use the processed queue from LLM
+        "host": os.environ.get("REDIS_HOST", "redis"),  # Use environment variable with redis service name as fallback
+        "port": 6379,
+        "queue_name": "scraped_items",
+        "wait_time": 30,
     }
 
     # Initialize Redis connection

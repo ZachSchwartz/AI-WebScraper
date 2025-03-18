@@ -4,6 +4,7 @@ Main entry point for the LLM processor.
 
 import os
 import sys
+import json
 from llm_processor import LLMProcessor
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
@@ -46,7 +47,13 @@ def main() -> None:
     print("\nDisplaying processed items:")
     processed_items = queue_manager.read_queue(queue_manager.processed_queue_name)
     
-    if not processed_items:
+    if processed_items:
+        for item in processed_items:
+            if queue_manager.publish_item(item):
+                print(f"Successfully published item with relevance score: {item.get('relevance_analysis', {}).get('score', 'N/A')}")
+            else:
+                print("Failed to publish item")
+    else:
         print("No processed items found in the queue. Trying a direct check...")
         # Try a direct check of the queue
         try:
