@@ -74,7 +74,7 @@ def main(target_url: str, target_keyword: str) -> None:
     """Main entry point for the scraper."""
     queue_config = {
         "type": "redis",
-        "host": "redis",  # Docker service name
+        "host": os.environ.get("REDIS_HOST", "redis"),  # Use environment variable with redis service name as fallback
         "port": 6379,
         "queue_name": "scraped_items",
     }

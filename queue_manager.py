@@ -115,9 +115,10 @@ class QueueManager:
         try:
             # Push to processed queue
             self.redis_client.lpush(self.processed_queue_name, json.dumps(item))
+            print(f"Added item to processed queue '{self.processed_queue_name}'")
             return True
         except Exception as e:
-            print(f"Error updating item in Redis: {str(e)}")
+            print(f"Error adding item to processed queue: {str(e)}")
             return False
 
     def process_queue(self, processor: Callable[[Dict[str, Any]], Dict[str, Any]]) -> None:
@@ -139,6 +140,7 @@ class QueueManager:
                         try:
                             # Process the item
                             processed_item = processor(item)
+                            
                             # Update the item in Redis
                             if self.update_item(processed_item):
                                 processed_count += 1
@@ -147,8 +149,6 @@ class QueueManager:
                 else:
                     if processed_count > 0:
                         print(f"Queue empty after processing {processed_count} items")
-                        print("Reading processed queue:")
-                        self.read_queue()
                         break
                     else:
                         print(f"Queue empty, waiting {self.wait_time} seconds")
