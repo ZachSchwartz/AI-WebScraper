@@ -11,6 +11,12 @@ from flask import Flask, request, jsonify
 from scraper import scrape
 from datetime import datetime
 import time
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
 from queue_manager import QueueManager
@@ -98,18 +104,11 @@ def run_scraper(
         print(f"Unexpected error in scraping job: {str(e)}")
         raise
 
-@app.route('/scrape', methods=['POST'])
-def scrape_endpoint():
-    """API endpoint to handle scraping requests."""
-    data = request.json
-    url = data.get('url')
-    keyword = data.get('keyword')
-    
-    if not url or not keyword:
-        return jsonify({'error': 'URL and keyword are required'}), 400
-    
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint."""
     try:
-        # Initialize queue manager
+        # Check Redis connection
         queue_config = {
             "type": "redis",
             "host": os.environ.get("REDIS_HOST", "redis"),
@@ -117,18 +116,60 @@ def scrape_endpoint():
             "queue_name": "scraped_items",
         }
         queue_manager = QueueManager(queue_config)
+        queue_manager.redis_client.ping()
+        queue_manager.close()
         
-        # Clear queues before starting
-        queue_manager.clear_queues()
+        return jsonify({
+            'status': 'healthy',
+            'service': 'producer',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'service': 'producer',
+            'error': str(e)
+        }), 500
+
+@app.route('/scrape', methods=['POST'])
+def scrape_endpoint():
+    """API endpoint to handle scraping requests."""
+    logger.info("Received scrape request")
+    data = request.json
+    logger.info(f"Request data: {data}")
+    
+    url = data.get('url')
+    keyword = data.get('keyword')
+    
+    if not url or not keyword:
+        logger.error("Missing URL or keyword in request")
+        return jsonify({'error': 'URL and keyword are required'}), 400
+    
+    try:
+        logger.info("Initializing queue manager")
+        # Initialize queue manager
+        queue_config = {
+            "type": "redis",
+            "host": os.environ.get("REDIS_HOST", "redis"),
+            "port": 6379,
+            "queue_name": "scraped_items",
+        }
+        logger.info(f"Queue config: {queue_config}")
+        queue_manager = QueueManager(queue_config)
+        
+        logger.info("Starting scraper")
+        # Run scraper without clearing queues
         run_scraper(queue_manager, url, keyword)
         
+        logger.info("Reading queue contents")
         # Read queue contents
         queue_items = queue_manager.read_queue()
+        logger.info(f"Found {len(queue_items) if queue_items else 0} items in queue")
         
         # Close queue manager
         queue_manager.close()
         
-        return jsonify({
+        response_data = {
             'message': 'Scraping completed successfully',
             'status': 'success',
             'details': {
@@ -137,8 +178,11 @@ def scrape_endpoint():
                 'timestamp': datetime.now().isoformat(),
                 'queue_items': queue_items  # Include queue contents in response
             }
-        })
+        }
+        logger.info(f"Sending response: {response_data}")
+        return jsonify(response_data)
     except Exception as e:
+        logger.error(f"Error in scrape endpoint: {str(e)}", exc_info=True)
         return jsonify({
             'error': str(e),
             'status': 'error'
@@ -157,8 +201,6 @@ def main(target_url: str, target_keyword: str) -> None:
     print("Queue manager initialized")
 
     try:
-        # Clear queues before starting
-        queue_manager.clear_queues()
         print(f"Scraping URL: {target_url} with keyword: {target_keyword} in main")
         run_scraper(queue_manager, target_url, target_keyword)
     finally:

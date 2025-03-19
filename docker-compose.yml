@@ -9,9 +9,10 @@ services:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   postgres:
     image: postgres:14
@@ -26,9 +27,10 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   producer:
     build:
@@ -38,8 +40,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      llm:
-        condition: service_started
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
@@ -48,6 +48,12 @@ services:
       - ./producer/src:/app/src
       - ./queue_manager.py:/app/queue_manager.py
     command: python src/producer_main.py
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   llm:
     build:

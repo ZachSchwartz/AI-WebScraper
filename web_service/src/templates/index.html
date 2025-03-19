@@ -83,6 +83,7 @@
             results.innerHTML = '';
 
             try {
+                console.log('Sending request to /api/scrape');
                 const response = await fetch('/api/scrape', {
                     method: 'POST',
                     headers: {
@@ -91,7 +92,9 @@
                     body: JSON.stringify({ url, keyword }),
                 });
 
+                console.log('Response received:', response.status);
                 const data = await response.json();
+                console.log('Response data:', data);
 
                 if (!response.ok) {
                     throw new Error(data.error || 'Failed to scrape');
@@ -101,21 +104,21 @@
                 results.innerHTML = `
                     <div class="alert alert-success">
                         <h5>Processing Pipeline Completed</h5>
-                        <p>${data.message}</p>
+                        <p>${data.message || 'No message available'}</p>
                         <hr>
                         <p><strong>Details:</strong></p>
                         <ul>
-                            <li>URL: ${data.details.url}</li>
-                            <li>Keyword: ${data.details.keyword}</li>
-                            <li>Timestamp: ${new Date(data.details.timestamp).toLocaleString()}</li>
-                            ${data.details.items_processed ? `<li>Items Processed: ${data.details.items_processed}</li>` : ''}
-                            ${data.details.db_status ? `<li>Database Status: ${data.details.db_status}</li>` : ''}
+                            <li>URL: ${data.details?.url || 'N/A'}</li>
+                            <li>Keyword: ${data.details?.keyword || 'N/A'}</li>
+                            <li>Timestamp: ${data.details?.timestamp ? new Date(data.details.timestamp).toLocaleString() : 'N/A'}</li>
+                            ${data.details?.items_processed ? `<li>Items Processed: ${data.details.items_processed}</li>` : ''}
+                            ${data.details?.db_status ? `<li>Database Status: ${data.details.db_status}</li>` : ''}
                         </ul>
                     </div>
                 `;
 
                 // If we have LLM results, display them
-                if (data.details.results && data.details.results.length > 0) {
+                if (data.details?.results && data.details.results.length > 0) {
                     const resultsList = document.createElement('div');
                     resultsList.className = 'mt-4';
                     resultsList.innerHTML = `
@@ -146,9 +149,13 @@
                 }
                 resultCard.style.display = 'block';
             } catch (error) {
+                console.error('Error during scraping:', error);
                 results.innerHTML = `
                     <div class="alert alert-danger">
-                        Error: ${error.message}
+                        <h5>Error</h5>
+                        <p>${error.message}</p>
+                        <hr>
+                        <p>Please check the console for more details.</p>
                     </div>
                 `;
                 resultCard.style.display = 'block';
