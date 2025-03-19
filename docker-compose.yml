@@ -90,32 +90,17 @@ services:
       - ./queue_manager.py:/app/queue_manager.py
     command: python src/db_main.py
 
-  # Example of running multiple producers with different parameters
-  producer_news:
+  web:
     build:
-      context: ./producer
+      context: ./web_service
       dockerfile: Dockerfile
-    restart: "no"
+    ports:
+      - "8080:5000"
     depends_on:
-      redis:
-        condition: service_healthy
+      - producer
     environment:
-      - PYTHONUNBUFFERED=1
-      - REDIS_HOST=redis
-    command: python src/main.py --url "https://news.example.com" --keyword "news"
-
-  producer_blog:
-    build:
-      context: ./producer
-      dockerfile: Dockerfile
+      - PRODUCER_SERVICE_URL=http://producer:5000
     restart: "no"
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - REDIS_HOST=redis
-    command: python src/main.py --url "https://blog.example.com" --keyword "blog"
 
 volumes:
   redis_data:
