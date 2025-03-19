@@ -103,50 +103,13 @@
                 // Display results
                 results.innerHTML = `
                     <div class="alert alert-success">
-                        <h5>Processing Pipeline Completed</h5>
-                        <p>${data.message || 'No message available'}</p>
-                        <hr>
-                        <p><strong>Details:</strong></p>
-                        <ul>
-                            <li>URL: ${data.details?.url || 'N/A'}</li>
-                            <li>Keyword: ${data.details?.keyword || 'N/A'}</li>
-                            <li>Timestamp: ${data.details?.timestamp ? new Date(data.details.timestamp).toLocaleString() : 'N/A'}</li>
-                            ${data.details?.items_processed ? `<li>Items Processed: ${data.details.items_processed}</li>` : ''}
-                            ${data.details?.db_status ? `<li>Database Status: ${data.details.db_status}</li>` : ''}
-                        </ul>
+                        <h5>Raw Producer Response</h5>
+                        <pre class="mt-3" style="white-space: pre-wrap; word-wrap: break-word;">
+                            ${JSON.stringify(data, null, 2)}
+                        </pre>
                     </div>
                 `;
 
-                // If we have LLM results, display them
-                if (data.details?.results && data.details.results.length > 0) {
-                    const resultsList = document.createElement('div');
-                    resultsList.className = 'mt-4';
-                    resultsList.innerHTML = `
-                        <h5>Processed Links and Scores</h5>
-                        <div class="list-group">
-                    `;
-
-                    data.details.results.forEach(item => {
-                        const score = item.score || 'N/A';
-                        const link = item.url || item.href || 'No URL';
-                        const title = item.title || 'No Title';
-                        
-                        resultsList.innerHTML += `
-                            <div class="list-group-item">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <h6 class="mb-1">${title}</h6>
-                                        <p class="mb-1"><a href="${link}" target="_blank">${link}</a></p>
-                                    </div>
-                                    <span class="badge bg-primary rounded-pill">Score: ${score}</span>
-                                </div>
-                            </div>
-                        `;
-                    });
-
-                    resultsList.innerHTML += '</div>';
-                    results.appendChild(resultsList);
-                }
                 resultCard.style.display = 'block';
             } catch (error) {
                 console.error('Error during scraping:', error);

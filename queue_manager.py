@@ -121,17 +121,22 @@ class QueueManager:
             print(f"Error adding item to processed queue: {str(e)}")
             return False
 
-    def process_queue(self, processor: Callable[[Dict[str, Any]], Dict[str, Any]]) -> None:
+    def process_queue(self, processor: Callable[[Dict[str, Any]], Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Process items from the queue continuously.
 
         Args:
-            processor: Callback function to process each item
+            processor: Callback function to process each item. Can be either a standalone function
+                      or an instance method (in which case it should be passed as a lambda)
+
+        Returns:
+            List of successfully processed items
         """
         print("Starting queue processing")
         processed_count = 0
         iteration_count = 0
         max_iterations = getattr(self, 'max_iterations', 1000)  # Default to 1000 if not set
+        processed_items = []
         
         try:
             while iteration_count < max_iterations:
@@ -147,11 +152,15 @@ class QueueManager:
                             if self.queue_name != self.processed_queue_name:
                                 if self.update_item(processed_item):
                                     processed_count += 1
+                                    processed_items.append(processed_item)
                             else:
                                 processed_count += 1
+                                processed_items.append(processed_item)
                                 
                         except Exception as e:
                             print(f"Error processing item: {str(e)}")
+                            # Don't count failed items as processed
+                            continue
                 else:
                     if processed_count > 0:
                         print(f"Queue empty after processing {processed_count} items")
@@ -169,6 +178,8 @@ class QueueManager:
             print("Stopping queue processing")
         finally:
             self.close()
+            
+        return processed_items
 
     def close(self) -> None:
         """Close connections to Redis."""

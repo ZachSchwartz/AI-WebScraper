@@ -42,18 +42,6 @@ def health_check():
             'error': str(e)
         }), 500
 
-def trigger_db_processing():
-    """Trigger database processing of the LLM-processed items."""
-    db_service_url = os.environ.get("DB_SERVICE_URL", "http://db_processor:5000")
-    try:
-        response = requests.post(f"{db_service_url}/process")
-        response.raise_for_status()
-        print("Successfully triggered database processing")
-        return True
-    except requests.exceptions.RequestException as e:
-        print(f"Error triggering database processing: {str(e)}")
-        return False
-
 def process_queue():
     """Process items in the queue."""
     # Configure Redis connection
@@ -76,7 +64,8 @@ def process_queue():
     print(f"Processed queue '{queue_manager.processed_queue_name}' length: {processed_queue_length}")
 
     processor = LLMProcessor()
-    queue_manager.process_queue(processor.process_item)
+    # Use lambda to maintain instance context
+    queue_manager.process_queue(lambda item: processor.process_item(item))
 
     # Print queue length after processing
     print("\nAfter processing:")
@@ -84,9 +73,6 @@ def process_queue():
     processed_queue_length = queue_manager.redis_client.llen(queue_manager.processed_queue_name)
     print(f"Input queue '{queue_manager.queue_name}' length: {input_queue_length}")
     print(f"Processed queue '{queue_manager.processed_queue_name}' length: {processed_queue_length}")
-    
-    # Trigger database processing after successful LLM processing
-    trigger_db_processing()
 
 @app.route('/process', methods=['POST'])
 def process_endpoint():
@@ -109,7 +95,7 @@ def process_endpoint():
         
         # Process items
         processor = LLMProcessor()
-        processed_items = queue_manager.process_queue(processor.process_item)
+        processed_items = queue_manager.process_queue(lambda item: processor.process_item(item))
         
         # Get queue length after processing
         processed_queue_length = queue_manager.redis_client.llen(queue_manager.processed_queue_name)

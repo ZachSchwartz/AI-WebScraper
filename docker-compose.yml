@@ -132,9 +132,16 @@ services:
       db_processor:
         condition: service_healthy
     environment:
+      - PYTHONUNBUFFERED=1
       - PRODUCER_SERVICE_URL=http://producer:5000
       - LLM_SERVICE_URL=http://llm:5000
       - DB_SERVICE_URL=http://db_processor:5000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: "no"
 
 volumes:

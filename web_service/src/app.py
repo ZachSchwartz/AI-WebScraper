@@ -78,9 +78,30 @@ def scrape():
         producer_data = producer_response.json()
         logger.info(f"Producer service response: {producer_data}")
 
-        # Wait a moment for the LLM service to process
-        logger.info("Waiting for LLM processing...")
-        time.sleep(2)
+        # Wait for producer to finish processing by checking Redis queue
+        logger.info("Waiting for producer to finish processing...")
+        max_retries = 10  # 10 attempts
+        retry_delay = 1  # 1 second between attempts
+        
+        for attempt in range(max_retries):
+            try:
+                # Check Redis queue length
+                redis_response = requests.get(f"{PRODUCER_SERVICE_URL}/queue/status")
+                redis_response.raise_for_status()
+                queue_status = redis_response.json()
+                
+                if queue_status.get('items_ready', False):
+                    logger.info("Producer has items ready in queue")
+                    break
+                    
+                logger.info(f"Waiting for items in queue, attempt {attempt + 1}/{max_retries}")
+                time.sleep(retry_delay)
+                
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error checking queue status: {str(e)}")
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(retry_delay)
 
         # Call the LLM service to get results
         logger.info("Calling LLM service")
@@ -89,30 +110,7 @@ def scrape():
         llm_data = llm_response.json()
         logger.info(f"LLM service response: {llm_data}")
 
-        # Wait a moment for the database service to process
-        logger.info("Waiting for database processing...")
-        time.sleep(1)
-
-        # Call the database service to get processing status
-        logger.info("Calling database service")
-        db_response = requests.post(f"{DB_SERVICE_URL}/process")
-        db_response.raise_for_status()
-        db_data = db_response.json()
-        logger.info(f"Database service response: {db_data}")
-
-        # Combine the results
-        combined_data = {
-            'message': f"{producer_data['message']}, {llm_data['message']}, and {db_data['message']}",
-            'status': 'success' if all(data['status'] == 'success' for data in [producer_data, llm_data, db_data]) else 'error',
-            'details': {
-                **producer_data['details'],
-                **llm_data['details'],
-                **db_data['details']
-            }
-        }
-        logger.info(f"Combined response data: {combined_data}")
-
-        return jsonify(combined_data)
+        return jsonify(llm_data)
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {str(e)}")
         return jsonify({
