@@ -5,21 +5,36 @@ Main entry point for the LLM processor.
 import os
 import sys
 import json
+import requests
+from flask import Flask, request, jsonify
 from llm_processor import LLMProcessor
+from datetime import datetime
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
 from queue_manager import QueueManager
 
+app = Flask(__name__)
 
-def main() -> None:
-    """Initialize and run the LLM processor."""
+def trigger_db_processing():
+    """Trigger database processing of the LLM-processed items."""
+    db_service_url = os.environ.get("DB_SERVICE_URL", "http://db_processor:5000")
+    try:
+        response = requests.post(f"{db_service_url}/process")
+        response.raise_for_status()
+        print("Successfully triggered database processing")
+        return True
+    except requests.exceptions.RequestException as e:
+        print(f"Error triggering database processing: {str(e)}")
+        return False
+
+def process_queue():
+    """Process items in the queue."""
     # Configure Redis connection
     redis_config = {
         "type": "redis",
-        "host": os.environ.get("REDIS_HOST", "localhost"),  # Use environment variable with localhost as fallback
-        "port": 6379,  # Use default Redis port
+        "host": os.environ.get("REDIS_HOST", "localhost"),
+        "port": 6379,
         "queue_name": "scraped_items",
-        # Add wait_time to ensure we don't exit too quickly if the queue is empty
         "wait_time": 10,
     }
 
@@ -42,28 +57,62 @@ def main() -> None:
     processed_queue_length = queue_manager.redis_client.llen(queue_manager.processed_queue_name)
     print(f"Input queue '{queue_manager.queue_name}' length: {input_queue_length}")
     print(f"Processed queue '{queue_manager.processed_queue_name}' length: {processed_queue_length}")
+    
+    # Trigger database processing after successful LLM processing
+    trigger_db_processing()
 
-    # Display processed items
-    # print("\nDisplaying processed items:")
-    # processed_items = queue_manager.read_queue(queue_manager.processed_queue_name)
-    # print("processed_items: ", processed_items)
-    # if processed_items:
-    #     for item in processed_items:
-    #         if queue_manager.publish_item(item):
-    #             print(f"Successfully published item with relevance score: {item.get('relevance_analysis', {}).get('score', 'N/A')}")
-    #         else:
-    #             print("Failed to publish item")
-    # else:
-    #     print("No processed items found in the queue. Trying a direct check...")
-    #     # Try a direct check of the queue
-    #     try:
-    #         for i in range(queue_manager.redis_client.llen(queue_manager.processed_queue_name)):
-    #             item_json = queue_manager.redis_client.lindex(queue_manager.processed_queue_name, i)
-    #             if item_json:
-    #                 print(f"Found raw item in processed queue: {item_json[:100]}...")
-    #     except Exception as e:
-    #         print(f"Error directly checking processed queue: {e}")
+@app.route('/process', methods=['POST'])
+def process_endpoint():
+    """API endpoint to trigger queue processing."""
+    try:
+        # Configure Redis connection
+        redis_config = {
+            "type": "redis",
+            "host": os.environ.get("REDIS_HOST", "localhost"),
+            "port": 6379,
+            "queue_name": "scraped_items",
+            "wait_time": 10,
+        }
 
+        # Initialize Redis connection
+        queue_manager = QueueManager(redis_config)
+        
+        # Get queue length before processing
+        input_queue_length = queue_manager.redis_client.llen(queue_manager.queue_name)
+        
+        # Process items
+        processor = LLMProcessor()
+        processed_items = queue_manager.process_queue(processor.process_item)
+        
+        # Get queue length after processing
+        processed_queue_length = queue_manager.redis_client.llen(queue_manager.processed_queue_name)
+        
+        return jsonify({
+            'message': 'LLM processing completed successfully',
+            'status': 'success',
+            'details': {
+                'items_processed': len(processed_items),
+                'input_queue_length': input_queue_length,
+                'processed_queue_length': processed_queue_length,
+                'timestamp': datetime.now().isoformat(),
+                'results': processed_items
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
+
+def main() -> None:
+    """Initialize and run the LLM processor."""
+    # Check if we're running in API mode (no arguments)
+    if len(sys.argv) == 1:
+        # Run as API server
+        app.run(host='0.0.0.0', port=5000)
+    else:
+        # Run as command line tool
+        process_queue()
 
 if __name__ == "__main__":
     main()

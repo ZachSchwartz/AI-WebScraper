@@ -41,38 +41,46 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
+      - LLM_SERVICE_URL=http://llm:5000
     volumes:
       - ./producer/src:/app/src
       - ./queue_manager.py:/app/queue_manager.py
-    command: python src/producer_main.py --url "https://example.com" --keyword "python"
+    command: python src/producer_main.py
 
   llm:
     build:
       context: .
       dockerfile: LLM/Dockerfile
     restart: "no"
+    ports:
+      - "5001:5000"
     depends_on:
       redis:
         condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
+      - DB_SERVICE_URL=http://db_processor:5000
+      - TRANSFORMERS_CACHE=/app/model_cache
+      - HF_HOME=/app/model_cache
     volumes:
       - ./LLM/src:/app/src
       - model_cache:/app/model_cache
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    user: root  # Temporarily use root to ensure cache directory permissions
+    command: >
+      bash -c "
+        mkdir -p /app/model_cache &&
+        chmod -R 777 /app/model_cache &&
+        python src/llm_main.py
+      "
 
   db_processor:
     build:
       context: .
       dockerfile: database/Dockerfile
     restart: "no"
+    ports:
+      - "5002:5000"
     depends_on:
       redis:
         condition: service_healthy

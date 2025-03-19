@@ -7,12 +7,26 @@ import os
 import sys
 from typing import Optional
 import requests
+from flask import Flask, request, jsonify
 from scraper import scrape
+from datetime import datetime
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
 from queue_manager import QueueManager
 
+app = Flask(__name__)
 
+def trigger_llm_processing():
+    """Trigger LLM processing of the scraped items."""
+    llm_service_url = os.environ.get("LLM_SERVICE_URL", "http://llm:5000")
+    try:
+        response = requests.post(f"{llm_service_url}/process")
+        response.raise_for_status()
+        print("Successfully triggered LLM processing")
+        return True
+    except requests.exceptions.RequestException as e:
+        print(f"Error triggering LLM processing: {str(e)}")
+        return False
 
 def run_scraper(
     queue_manager: QueueManager, target_url: str, target_keyword: str
@@ -60,21 +74,64 @@ def run_scraper(
                 queue_manager.publish_item(item)
 
             print(f"Published {len(results)} items to queue")
+            
+            # Trigger LLM processing after successful scraping
+            trigger_llm_processing()
         else:
             print("No results found during scraping")
 
     except (requests.exceptions.RequestException, ValueError) as e:
         print(f"Error in scraping job: {str(e)}")
+        raise
     except Exception as e:
         print(f"Unexpected error in scraping job: {str(e)}")
-        raise  # Re-raise unexpected exceptions
+        raise
 
+@app.route('/scrape', methods=['POST'])
+def scrape_endpoint():
+    """API endpoint to handle scraping requests."""
+    data = request.json
+    url = data.get('url')
+    keyword = data.get('keyword')
+    
+    if not url or not keyword:
+        return jsonify({'error': 'URL and keyword are required'}), 400
+    
+    try:
+        # Initialize queue manager
+        queue_config = {
+            "type": "redis",
+            "host": os.environ.get("REDIS_HOST", "redis"),
+            "port": 6379,
+            "queue_name": "scraped_items",
+        }
+        queue_manager = QueueManager(queue_config)
+        
+        # Clear queues before starting
+        queue_manager.clear_queues()
+        run_scraper(queue_manager, url, keyword)
+        queue_manager.close()
+        
+        return jsonify({
+            'message': 'Scraping completed successfully',
+            'status': 'success',
+            'details': {
+                'url': url,
+                'keyword': keyword,
+                'timestamp': datetime.now().isoformat()
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
 
 def main(target_url: str, target_keyword: str) -> None:
-    """Main entry point for the scraper."""
+    """Main entry point for the scraper when run directly."""
     queue_config = {
         "type": "redis",
-        "host": os.environ.get("REDIS_HOST", "redis"),  # Use environment variable with redis service name as fallback
+        "host": os.environ.get("REDIS_HOST", "redis"),
         "port": 6379,
         "queue_name": "scraped_items",
     }
@@ -91,24 +148,29 @@ def main(target_url: str, target_keyword: str) -> None:
         queue_manager.read_queue()
         queue_manager.close()
 
-
 if __name__ == "__main__":
-    # Try to get URL and keyword from environment variables first
-    url: Optional[str] = os.environ.get("URL")
-    keyword: Optional[str] = os.environ.get("KEYWORD")
+    # Check if we're running in API mode (no arguments)
+    if len(sys.argv) == 1:
+        # Run as API server
+        app.run(host='0.0.0.0', port=5000)
+    else:
+        # Run as command line tool
+        # Try to get URL and keyword from environment variables first
+        url: Optional[str] = os.environ.get("URL")
+        keyword: Optional[str] = os.environ.get("KEYWORD")
 
-    # If not in environment, try command line arguments
-    if not url or not keyword:
-        parser = argparse.ArgumentParser(description="Web scraper producer")
-        parser.add_argument("--url", required=True, help="Target URL to scrape")
-        parser.add_argument("--keyword", required=True, help="Keyword to search for")
-        args = parser.parse_args()
-        url = args.url
-        keyword = args.keyword
+        # If not in environment, try command line arguments
+        if not url or not keyword:
+            parser = argparse.ArgumentParser(description="Web scraper producer")
+            parser.add_argument("--url", required=True, help="Target URL to scrape")
+            parser.add_argument("--keyword", required=True, help="Keyword to search for")
+            args = parser.parse_args()
+            url = args.url
+            keyword = args.keyword
 
-    if not url or not keyword:
-        print("Error: URL and keyword are required")
-        sys.exit(1)
+        if not url or not keyword:
+            print("Error: URL and keyword are required")
+            sys.exit(1)
 
-    print(f"Scraping URL: {url} with keyword: {keyword}")
-    main(url, keyword)
+        print(f"Scraping URL: {url} with keyword: {keyword}")
+        main(url, keyword)

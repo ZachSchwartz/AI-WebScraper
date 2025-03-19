@@ -100,10 +100,50 @@
                 // Display results
                 results.innerHTML = `
                     <div class="alert alert-success">
-                        Successfully scraped ${data.items?.length || 0} items
+                        <h5>Processing Pipeline Completed</h5>
+                        <p>${data.message}</p>
+                        <hr>
+                        <p><strong>Details:</strong></p>
+                        <ul>
+                            <li>URL: ${data.details.url}</li>
+                            <li>Keyword: ${data.details.keyword}</li>
+                            <li>Timestamp: ${new Date(data.details.timestamp).toLocaleString()}</li>
+                            ${data.details.items_processed ? `<li>Items Processed: ${data.details.items_processed}</li>` : ''}
+                            ${data.details.db_status ? `<li>Database Status: ${data.details.db_status}</li>` : ''}
+                        </ul>
                     </div>
-                    <pre class="bg-light p-3 rounded">${JSON.stringify(data, null, 2)}</pre>
                 `;
+
+                // If we have LLM results, display them
+                if (data.details.results && data.details.results.length > 0) {
+                    const resultsList = document.createElement('div');
+                    resultsList.className = 'mt-4';
+                    resultsList.innerHTML = `
+                        <h5>Processed Links and Scores</h5>
+                        <div class="list-group">
+                    `;
+
+                    data.details.results.forEach(item => {
+                        const score = item.score || 'N/A';
+                        const link = item.url || item.href || 'No URL';
+                        const title = item.title || 'No Title';
+                        
+                        resultsList.innerHTML += `
+                            <div class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-1">${title}</h6>
+                                        <p class="mb-1"><a href="${link}" target="_blank">${link}</a></p>
+                                    </div>
+                                    <span class="badge bg-primary rounded-pill">Score: ${score}</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    resultsList.innerHTML += '</div>';
+                    results.appendChild(resultsList);
+                }
                 resultCard.style.display = 'block';
             } catch (error) {
                 results.innerHTML = `

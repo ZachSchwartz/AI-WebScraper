@@ -1,8 +1,14 @@
 @echo off
 echo Building and starting containers...
 
-REM Build and start the containers
-docker-compose up --build -d
+REM Check if --build argument is provided
+if "%1"=="--build" (
+    echo Rebuilding containers...
+    docker-compose up --build -d
+) else (
+    echo Starting containers without rebuild...
+    docker-compose up -d
+)
 
 REM Wait for services to be ready
 echo Waiting for services to be ready...
