@@ -12,6 +12,7 @@ from scraper import scrape
 from datetime import datetime
 import time
 import logging
+import threading
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -145,48 +146,49 @@ def scrape_endpoint():
         logger.error("Missing URL or keyword in request")
         return jsonify({'error': 'URL and keyword are required'}), 400
     
-    try:
-        logger.info("Initializing queue manager")
-        # Initialize queue manager
-        queue_config = {
-            "type": "redis",
-            "host": os.environ.get("REDIS_HOST", "redis"),
-            "port": 6379,
-            "queue_name": "scraped_items",
+    # Immediately return received response
+    response_data = {
+        'message': 'Scraping request received',
+        'status': 'received',
+        'details': {
+            'url': url,
+            'keyword': keyword,
+            'timestamp': datetime.now().isoformat()
         }
-        logger.info(f"Queue config: {queue_config}")
-        queue_manager = QueueManager(queue_config)
-        
-        logger.info("Starting scraper")
-        # Run scraper without clearing queues
-        run_scraper(queue_manager, url, keyword)
-        
-        logger.info("Reading queue contents")
-        # Read queue contents
-        queue_items = queue_manager.read_queue()
-        logger.info(f"Found {len(queue_items) if queue_items else 0} items in queue")
-        
-        # Close queue manager
-        queue_manager.close()
-        
-        response_data = {
-            'message': 'Scraping completed successfully',
-            'status': 'success',
-            'details': {
-                'url': url,
-                'keyword': keyword,
-                'timestamp': datetime.now().isoformat(),
-                'queue_items': queue_items  # Include queue contents in response
-            }
-        }
-        logger.info(f"Sending response: {response_data}")
-        return jsonify(response_data)
-    except Exception as e:
-        logger.error(f"Error in scrape endpoint: {str(e)}", exc_info=True)
-        return jsonify({
-            'error': str(e),
-            'status': 'error'
-        }), 500
+    }
+    return jsonify(response_data)
+    # Start scraping in the background
+    # def background_scrape():
+    #     try:
+    #         logger.info("Initializing queue manager")
+    #         queue_config = {
+    #             "type": "redis",
+    #             "host": os.environ.get("REDIS_HOST", "redis"),
+    #             "port": 6379,
+    #             "queue_name": "scraped_items",
+    #         }
+    #         logger.info(f"Queue config: {queue_config}")
+    #         queue_manager = QueueManager(queue_config)
+            
+    #         logger.info("Starting scraper")
+    #         run_scraper(queue_manager, url, keyword)
+            
+    #         logger.info("Reading queue contents")
+    #         queue_items = queue_manager.read_queue()
+    #         logger.info(f"Found {len(queue_items) if queue_items else 0} items in queue")
+            
+    #         queue_manager.close()
+            
+    #     except Exception as e:
+    #         logger.error(f"Error in background scraping: {str(e)}", exc_info=True)
+    
+    # # Start background thread
+    # thread = threading.Thread(target=background_scrape)
+    # thread.daemon = True
+    # thread.start()
+    
+    # logger.info(f"Sending immediate response: {response_data}")
+    # return jsonify(response_data)
 
 def main(target_url: str, target_keyword: str) -> None:
     """Main entry point for the scraper when run directly."""
