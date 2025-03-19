@@ -10,6 +10,7 @@ import requests
 from flask import Flask, request, jsonify
 from scraper import scrape
 from datetime import datetime
+import time
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
 from queue_manager import QueueManager
@@ -19,14 +20,24 @@ app = Flask(__name__)
 def trigger_llm_processing():
     """Trigger LLM processing of the scraped items."""
     llm_service_url = os.environ.get("LLM_SERVICE_URL", "http://llm:5000")
-    try:
-        response = requests.post(f"{llm_service_url}/process")
-        response.raise_for_status()
-        print("Successfully triggered LLM processing")
-        return True
-    except requests.exceptions.RequestException as e:
-        print(f"Error triggering LLM processing: {str(e)}")
-        return False
+    max_retries = 5
+    retry_delay = 2  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"Attempting to trigger LLM processing (attempt {attempt + 1}/{max_retries})")
+            response = requests.post(f"{llm_service_url}/process")
+            response.raise_for_status()
+            print("Successfully triggered LLM processing")
+            return True
+        except requests.exceptions.RequestException as e:
+            print(f"Error triggering LLM processing (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print("Max retries exceeded for LLM processing")
+                return False
 
 def run_scraper(
     queue_manager: QueueManager, target_url: str, target_keyword: str
@@ -110,6 +121,11 @@ def scrape_endpoint():
         # Clear queues before starting
         queue_manager.clear_queues()
         run_scraper(queue_manager, url, keyword)
+        
+        # Read queue contents
+        queue_items = queue_manager.read_queue()
+        
+        # Close queue manager
         queue_manager.close()
         
         return jsonify({
@@ -118,7 +134,8 @@ def scrape_endpoint():
             'details': {
                 'url': url,
                 'keyword': keyword,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'queue_items': queue_items  # Include queue contents in response
             }
         })
     except Exception as e:

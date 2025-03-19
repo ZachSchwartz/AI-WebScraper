@@ -15,6 +15,33 @@ from queue_manager import QueueManager
 
 app = Flask(__name__)
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint."""
+    try:
+        # Check Redis connection
+        redis_config = {
+            "type": "redis",
+            "host": os.environ.get("REDIS_HOST", "localhost"),
+            "port": 6379,
+            "queue_name": "scraped_items",
+        }
+        queue_manager = QueueManager(redis_config)
+        queue_manager.redis_client.ping()
+        queue_manager.close()
+        
+        return jsonify({
+            'status': 'healthy',
+            'service': 'llm',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'service': 'llm',
+            'error': str(e)
+        }), 500
+
 def trigger_db_processing():
     """Trigger database processing of the LLM-processed items."""
     db_service_url = os.environ.get("DB_SERVICE_URL", "http://db_processor:5000")

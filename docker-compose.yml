@@ -38,6 +38,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      llm:
+        condition: service_started
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
@@ -67,6 +69,12 @@ services:
       - ./LLM/src:/app/src
       - model_cache:/app/model_cache
     user: root  # Temporarily use root to ensure cache directory permissions
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     command: >
       bash -c "
         mkdir -p /app/model_cache &&
@@ -96,6 +104,12 @@ services:
     volumes:
       - ./database/src:/app/src
       - ./queue_manager.py:/app/queue_manager.py
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     command: python src/db_main.py
 
   web:
@@ -105,9 +119,16 @@ services:
     ports:
       - "8080:5000"
     depends_on:
-      - producer
+      producer:
+        condition: service_healthy
+      llm:
+        condition: service_healthy
+      db_processor:
+        condition: service_healthy
     environment:
       - PRODUCER_SERVICE_URL=http://producer:5000
+      - LLM_SERVICE_URL=http://llm:5000
+      - DB_SERVICE_URL=http://db_processor:5000
     restart: "no"
 
 volumes:
