@@ -110,7 +110,34 @@ def scrape():
         llm_data = llm_response.json()
         logger.info(f"LLM service response: {llm_data}")
 
-        return jsonify(llm_data)
+        for attempt in range(max_retries):
+            try:
+                # Check Redis queue length
+                redis_response = requests.get(f"{LLM_SERVICE_URL}/queue/status")
+                redis_response.raise_for_status()
+                queue_status = redis_response.json()
+                
+                if queue_status.get('items_ready', False):
+                    logger.info("Producer has items ready in queue")
+                    break
+                    
+                logger.info(f"Waiting for items in queue, attempt {attempt + 1}/{max_retries}")
+                time.sleep(retry_delay)
+                
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error checking queue status: {str(e)}")
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(retry_delay)
+
+                # Call the LLM service to get results
+        logger.info("Calling db service")
+        db_response = requests.post(f"{DB_SERVICE_URL}/process")
+        db_response.raise_for_status()
+        db_data = db_response.json()
+        logger.info(f"db service response: {db_data}")
+
+        return jsonify(db_data)
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {str(e)}")
         return jsonify({

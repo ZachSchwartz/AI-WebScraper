@@ -10,10 +10,6 @@ if "%1"=="--build" (
     docker-compose up -d
 )
 
-REM Wait for services to be ready
-echo Waiting for services to be ready...
-timeout /t 10
-
 REM Open the web interface in the default browser
 start http://localhost:8080
 

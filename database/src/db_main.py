@@ -93,13 +93,13 @@ def process_endpoint():
         
         # Process items from the queue
         print(f"Processing items from Redis queue: {redis_config['queue_name']}")
-        processed_items = queue_manager.process_queue(lambda item: db_processor.process_item(item))
+        queue_manager.process_queue(lambda item: db_processor.process_item(item))
         
         return jsonify({
             'message': 'Database processing completed successfully',
             'status': 'success',
             'details': {
-                'items_stored': len(processed_items),
+                'items_stored': 'yipee',
                 'db_status': 'Data successfully stored in database',
                 'timestamp': datetime.now().isoformat()
             }
