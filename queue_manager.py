@@ -115,9 +115,10 @@ class QueueManager:
         try:
             # Push to processed queue
             self.redis_client.lpush(self.processed_queue_name, json.dumps(item))
+            print(f"Added item to processed queue '{self.processed_queue_name}'")
             return True
         except Exception as e:
-            print(f"Error updating item in Redis: {str(e)}")
+            print(f"Error adding item to processed queue: {str(e)}")
             return False
 
     def process_queue(self, processor: Callable[[Dict[str, Any]], Dict[str, Any]]) -> None:
@@ -129,9 +130,11 @@ class QueueManager:
         """
         print("Starting queue processing")
         processed_count = 0
+        iteration_count = 0
+        max_iterations = getattr(self, 'max_iterations', 1000)  # Default to 1000 if not set
         
         try:
-            while True:
+            while iteration_count < max_iterations:
                 items = self.get_batch()
                 if items:
                     print(f"Processing batch of {len(items)} items")
@@ -139,20 +142,29 @@ class QueueManager:
                         try:
                             # Process the item
                             processed_item = processor(item)
-                            # Update the item in Redis
-                            if self.update_item(processed_item):
+                            
+                            # Only update the item if we're not processing from the processed queue
+                            if self.queue_name != self.processed_queue_name:
+                                if self.update_item(processed_item):
+                                    processed_count += 1
+                            else:
                                 processed_count += 1
+                                
                         except Exception as e:
                             print(f"Error processing item: {str(e)}")
                 else:
                     if processed_count > 0:
                         print(f"Queue empty after processing {processed_count} items")
-                        print("Reading processed queue:")
-                        self.read_queue()
                         break
                     else:
                         print(f"Queue empty, waiting {self.wait_time} seconds")
                         time.sleep(self.wait_time)
+                
+                iteration_count += 1
+                
+            if iteration_count >= max_iterations:
+                print(f"Reached maximum iteration limit of {max_iterations}")
+                
         except KeyboardInterrupt:
             print("Stopping queue processing")
         finally:

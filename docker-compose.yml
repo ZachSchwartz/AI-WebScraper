@@ -2,19 +2,45 @@
 services:
   redis:
     image: redis:latest
+    restart: "no"
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:14
+    restart: "no"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: scraper
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   producer:
     build:
       context: .
       dockerfile: producer/Dockerfile
+    restart: "no"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
     volumes:
       - ./producer/src:/app/src
       - ./queue_manager.py:/app/queue_manager.py
@@ -24,10 +50,13 @@ services:
     build:
       context: .
       dockerfile: LLM/Dockerfile
+    restart: "no"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
     volumes:
       - ./LLM/src:/app/src
       - model_cache:/app/model_cache
@@ -39,27 +68,56 @@ services:
               count: 1
               capabilities: [gpu]
 
+  db_processor:
+    build:
+      context: .
+      dockerfile: database/Dockerfile
+    restart: "no"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DB_HOST=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=scraper
+      - REDIS_HOST=redis
+    volumes:
+      - ./database/src:/app/src
+      - ./queue_manager.py:/app/queue_manager.py
+    command: python src/db_main.py
+
   # Example of running multiple producers with different parameters
   producer_news:
     build:
       context: ./producer
       dockerfile: Dockerfile
+    restart: "no"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
     command: python src/main.py --url "https://news.example.com" --keyword "news"
 
   producer_blog:
     build:
       context: ./producer
       dockerfile: Dockerfile
+    restart: "no"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
     command: python src/main.py --url "https://blog.example.com" --keyword "blog"
 
 volumes:
   redis_data:
   model_cache:
+  postgres_data:

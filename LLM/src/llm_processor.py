@@ -85,18 +85,17 @@ class LLMProcessor:
         self.embedding_cache[embedding_key] = embedding
         return embedding
 
-    def generate_relevance_score(self, text: str, keyword: str) -> Tuple[float, str]:
+    def generate_relevance_score(self, text: str, keyword: str) -> float:
         """
         Generate a relevance score between 0 and 1 for the text relative to the keyword.
         Uses semantic analysis with sentence transformers and intelligent scoring.
-        The scoring is polarized - tending towards 0 for irrelevant content and 1 for highly relevant content.
-
+        
         Args:
             text: Text to analyze
             keyword: Keyword to compare against
 
         Returns:
-            Tuple of (score, explanation)
+            Score between 0 and 1
         """
         # Convert to lowercase for case-insensitive matching
         text_lower = text.lower()
@@ -113,8 +112,7 @@ class LLMProcessor:
         # Calculate semantic similarity
         semantic_sim = util.cos_sim(text_embedding, keyword_embedding).item()
 
-        # Normalize semantic similarity to 0-1 range with more aggressive polarization
-        # Using a steeper sigmoid curve (increased from 5 to 8)
+        # Normalize semantic similarity to 0-1 range
         semantic_score = 1 / (1 + np.exp(-8 * semantic_sim))
 
         # 3. Context analysis with increased weight for exact matches
@@ -139,15 +137,13 @@ class LLMProcessor:
                     ).item()
                     context_score = 1 / (1 + np.exp(-8 * context_sim))
 
-        # Combine scores with more polarized weighting
-        # Exact match gets even higher weight (0.5), semantic similarity (0.3), context (0.2)
+        # Combine scores with polarized weighting
         score = 0.5 * exact_match + 0.3 * semantic_score + 0.2 * context_score
 
-        # Apply a more aggressive sigmoid transformation to make scores more polarized
-        # Increased steepness from 5 to 10 and shifted threshold to 0.6
+        # Apply a sigmoid transformation
         score = 1 / (1 + np.exp(-10 * (score - 0.6)))
 
-        # Add a final threshold to push scores even more towards extremes
+        # Add a final threshold to push scores towards extremes
         if score > 0.7:
             score = 1.0
         elif score < 0.3:
@@ -205,6 +201,10 @@ class LLMProcessor:
             # Get the keyword and pre-processed text
             keyword = item.get("keyword", "").lower()
             processed_text = item.get("processed_text", "")
+            
+            # Try alternative text fields if processed_text is empty
+            if not processed_text:
+                processed_text = item.get("text", item.get("content", ""))
 
             # Generate relevance score
             score = self.generate_relevance_score(processed_text, keyword)
@@ -219,18 +219,14 @@ class LLMProcessor:
                 "keyword": keyword,
                 "score": score,
                 "extracted_keywords": extracted_keywords,
-                "source_url": item.get("source_url"),  # Add source URL for reference
-                "metadata_used": bool(
-                    item.get("metadata")
-                ),  # Track if metadata was used
-                "context_used": bool(item.get("context")),  # Track if context was used
+                "source_url": item.get("source_url", item.get("href", "")),
+                "metadata_used": bool(item.get("metadata")),
+                "context_used": bool(item.get("context")),
             }
 
-            print(
-                f"Generated relevance score {score:.2f} for URL: {item.get('href', 'unknown')}"
-            )
             return processed_item
 
         except Exception as e:
             print(f"Error processing item: {str(e)}")
-            return item  # Return original item if processing fails
+            # Return original item if processing fails
+            return item
