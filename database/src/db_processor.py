@@ -81,50 +81,80 @@ class DatabaseProcessor:
     
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process an item from the Redis queue and transform it for database storage.
+        Process an item from the Redis queue and store it in the database.
         
         Args:
             item: Dictionary containing processed data from LLM
             
         Returns:
-            Dictionary containing transformed data
+            The original item, for compatibility with queue_manager
         """
         try:
-            # Extract data from item
-            # url = item.get("href", "")
-            # title = item.get("title", "")
-            #text_content = item.get("processed_text", "")
-            # source_url = item.get("source_url", "")
+            print(f"\nProcessing item from Redis queue:")
+            print(f"Item keys: {list(item.keys())}")
             
-            # # Validate and clean URL
-            # if url.startswith('#'):
-            #     url = source_url
-            # elif not url.startswith(('http://', 'https://')):
-            #     url = source_url
+            # Extract data from item
+            url = item.get("href", "")
+            title = item.get("title", "")
+            text_content = item.get("processed_text", "")
+            source_url = item.get("source_url", "")
+            
+            # Validate and clean URL
+            if url.startswith('#'):
+                print(f"Warning: URL '{url}' is a fragment identifier, using source_url as fallback")
+                url = source_url
+            elif not url.startswith(('http://', 'https://')):
+                print(f"Warning: URL '{url}' is not absolute, using source_url as fallback")
+                url = source_url
             
             # Use fallback for title if empty
-            # if not title:
-            #     title = item.get("aria-label", "") or "Untitled"
+            if not title:
+                title = item.get("aria-label", "") or "Untitled"
+            
+            print(f"Extracted data:")
+            print(f"URL: {url}")
+            print(f"Title: {title}")
+            print(f"Text content length: {len(text_content) if text_content else 0}")
+            print(f"Source URL: {source_url}")
             
             # Extract relevance analysis if available
-            # relevance_analysis = item.get("relevance_analysis", {})
-            # keyword = relevance_analysis.get("keyword", "")
-            # relevance_score = relevance_analysis.get("score", 0.0)
+            relevance_analysis = item.get("relevance_analysis", {})
+            keyword = relevance_analysis.get("keyword", "")
+            relevance_score = relevance_analysis.get("score", 0.0)
             
-            # # Create transformed item
-            # processed_item = item.copy()
-            # processed_item["db_analysis"] = {
-            #     "model_name": "database_processor",
-            #     "keyword": keyword,
-            #     "score": relevance_score,
-            #     "extracted_keywords": [],  # No keyword extraction in DB processor
-            #     "source_url": source_url,
-            #     "metadata_used": bool(item.get("metadata")),
-            #     "context_used": bool(item.get("context")),
-            # }
+            print(f"Relevance analysis:")
+            print(f"Keyword: {keyword}")
+            print(f"Score: {relevance_score}")
             
-
-            return item
+            # Create new database item
+            db_item = ScrapedItem(
+                url=url,
+                title=title,
+                text_content=text_content,
+                source_url=source_url,
+                keyword=keyword,
+                relevance_score=relevance_score,
+                raw_data=item  # Store the entire item as JSON
+            )
+            
+            # Save to database
+            session = self.Session()
+            try:
+                print("\nAttempting to save to database...")
+                session.add(db_item)
+                session.commit()
+                print(f"Successfully saved item from {url} to database with relevance score: {relevance_score}")
+                print(f"Database item: {db_item}")
+            except Exception as e:
+                session.rollback()
+                print(f"Error saving item to database: {str(e)}")
+                print(f"Error type: {type(e)}")
+                import traceback
+                print(f"Traceback: {traceback.format_exc()}")
+            finally:
+                session.close()
+                
+            return item  # Return the original item for compatibility
             
         except Exception as e:
             print(f"Error processing item: {str(e)}")

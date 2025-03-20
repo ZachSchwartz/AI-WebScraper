@@ -109,8 +109,7 @@ def process_endpoint():
             "type": "redis",
             "host": os.environ.get("REDIS_HOST", "redis"),
             "port": 6379,
-            "queue_name": "scraped_items",
-            "wait_time": 30,
+            "queue_name": "scraped_items_processed",
         }
 
         # Initialize Redis connection
@@ -120,6 +119,7 @@ def process_endpoint():
         db_processor = DatabaseProcessor()
         # Process items from the queue
         items = queue_manager.process_queue(lambda item: db_processor.process_item(item))
+        # items = queue_manager.read_queue(queue_manager.processed_queue_name)
 
         queue_manager.clear_queues()
         
