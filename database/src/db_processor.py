@@ -1,7 +1,3 @@
-"""
-Database processor for storing processed items from Redis queue into SQL database.
-"""
-
 from typing import Dict, Any
 import sqlalchemy as sa
 from sqlalchemy.ext.declarative import declarative_base
@@ -10,6 +6,8 @@ from sqlalchemy.pool import QueuePool
 import json
 import os
 import logging
+from sqlalchemy import create_engine
+
 # Create SQLAlchemy base
 Base = declarative_base()
 
@@ -50,18 +48,47 @@ class DatabaseProcessor:
             db_port = os.getenv("DB_PORT", "5432")
             db_name = os.getenv("DB_NAME", "scraper")
             
-            # Create database URL
+            # Create database URL for the default database (postgres)
+            default_db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/postgres"
+            
+            # Create SQLAlchemy engine to connect to the default database
+            temp_engine = create_engine(
+                default_db_url,
+                poolclass=QueuePool,
+                pool_size=5,
+                max_overflow=10,
+                pool_timeout=30,
+                pool_recycle=1800,
+                pool_pre_ping=True,
+                connect_args={"application_name": "test"}
+            )
+            
+            # Try to connect and create the target database if it doesn't exist
+            try:
+                # Connect to the default database (postgres)
+                with temp_engine.connect() as connection:
+                    connection.execute(f"SELECT 1 FROM pg_database WHERE datname = '{db_name}'")
+                    if not connection.fetchone():
+                        # Create the database if it doesn't exist
+                        print(f"Database '{db_name}' does not exist. Creating database...")
+                        connection.execute(f"CREATE DATABASE {db_name}")
+                        print(f"Database '{db_name}' created.")
+            except Exception as e:
+                print(f"Error checking/creating database: {str(e)}")
+            
+            # Now that the database exists, reconnect to the target database
             db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
             
-            # Create SQLAlchemy engine with connection pooling
+            # Create the main SQLAlchemy engine for the scraper database
             cls._engine = sa.create_engine(
                 db_url,
                 poolclass=QueuePool,
-                pool_size=5,  # Number of permanent connections to keep
-                max_overflow=10,  # Number of additional connections to allow
-                pool_timeout=30,  # Seconds to wait before giving up on getting a connection
-                pool_recycle=1800,  # Recycle connections after 30 minutes
-                pool_pre_ping=True  # Enable connection health checks
+                pool_size=5,
+                max_overflow=10,
+                pool_timeout=30,
+                pool_recycle=1800,
+                pool_pre_ping=True,
+                connect_args={"application_name": "test"}
             )
             
             # Create tables if they don't exist
@@ -151,9 +178,7 @@ class DatabaseProcessor:
                 print(f"Error type: {type(e)}")
                 import traceback
                 print(f"Traceback: {traceback.format_exc()}")
-            finally:
-                session.close()
-                
+
             return item  # Return the original item for compatibility
             
         except Exception as e:

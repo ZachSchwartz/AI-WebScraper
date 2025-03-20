@@ -1,4 +1,3 @@
-# docker-compose.yml
 services:
   redis:
     image: redis:latest
@@ -25,12 +24,27 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 3s
       timeout: 3s
       retries: 10
       start_period: 5s
+
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: "no"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com  # Change this
+      PGADMIN_DEFAULT_PASSWORD: admin  # Change this
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
 
   producer:
     build:
@@ -148,3 +162,4 @@ volumes:
   redis_data:
   model_cache:
   postgres_data:
+  pgadmin_data:
