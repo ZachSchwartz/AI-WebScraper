@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 import json
 import os
-
+import logging
 # Create SQLAlchemy base
 Base = declarative_base()
 
@@ -157,8 +157,5 @@ class DatabaseProcessor:
             return item  # Return the original item for compatibility
             
         except Exception as e:
-            print(f"Error processing item for database: {str(e)}")
-            print(f"Error type: {type(e)}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
-            return item  # Return the original item if processing fails 
+            print(f"Error processing item: {str(e)}")
+            return item 

@@ -9,9 +9,10 @@ services:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   postgres:
     image: postgres:14
@@ -26,9 +27,10 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   producer:
     build:
@@ -41,38 +43,58 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
+      - LLM_SERVICE_URL=http://llm:5000
     volumes:
       - ./producer/src:/app/src
       - ./queue_manager.py:/app/queue_manager.py
-    command: python src/producer_main.py --url "https://example.com" --keyword "python"
+    command: python src/producer_main.py
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   llm:
     build:
       context: .
       dockerfile: LLM/Dockerfile
     restart: "no"
+    ports:
+      - "5001:5000"
     depends_on:
       redis:
         condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
+      - DB_SERVICE_URL=http://db_processor:5000
+      - TRANSFORMERS_CACHE=/app/model_cache
+      - HF_HOME=/app/model_cache
     volumes:
       - ./LLM/src:/app/src
       - model_cache:/app/model_cache
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    user: root  # Temporarily use root to ensure cache directory permissions
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: >
+      bash -c "
+        mkdir -p /app/model_cache &&
+        chmod -R 777 /app/model_cache &&
+        python src/llm_main.py
+      "
 
   db_processor:
     build:
       context: .
       dockerfile: database/Dockerfile
     restart: "no"
+    ports:
+      - "5002:5000"
     depends_on:
       redis:
         condition: service_healthy
@@ -88,34 +110,39 @@ services:
     volumes:
       - ./database/src:/app/src
       - ./queue_manager.py:/app/queue_manager.py
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     command: python src/db_main.py
 
-  # Example of running multiple producers with different parameters
-  producer_news:
+  web:
     build:
-      context: ./producer
+      context: ./web_service
       dockerfile: Dockerfile
-    restart: "no"
+    ports:
+      - "8080:5000"
     depends_on:
-      redis:
+      producer:
+        condition: service_healthy
+      llm:
+        condition: service_healthy
+      db_processor:
         condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
-      - REDIS_HOST=redis
-    command: python src/main.py --url "https://news.example.com" --keyword "news"
-
-  producer_blog:
-    build:
-      context: ./producer
-      dockerfile: Dockerfile
+      - PRODUCER_SERVICE_URL=http://producer:5000
+      - LLM_SERVICE_URL=http://llm:5000
+      - DB_SERVICE_URL=http://db_processor:5000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: "no"
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      - PYTHONUNBUFFERED=1
-      - REDIS_HOST=redis
-    command: python src/main.py --url "https://blog.example.com" --keyword "blog"
 
 volumes:
   redis_data:

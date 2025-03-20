@@ -1,9 +1,15 @@
 # Web scraping
-requests==2.31.0
-beautifulsoup4==4.12.3
+requests==2.26.0
+beautifulsoup4==4.9.3
+selenium==4.1.0
+webdriver_manager==3.5.2
 
 # Queue
 redis==5.0.1
+
+# Web Framework
+flask==2.0.1
+werkzeug==2.0.3
 
 # Utilities
 python-dotenv==1.0.1

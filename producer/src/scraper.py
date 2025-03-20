@@ -10,6 +10,11 @@ from urllib.robotparser import RobotFileParser
 from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def is_allowed_by_robots(url: str, user_agent: str) -> bool:
@@ -248,47 +253,58 @@ def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, An
         metadata = extract_metadata(soup)
         container_selector = target_config.get("container_selector", "body")
         containers = soup.select(container_selector) if container_selector else [soup]
-        keyword = target_config.get("keyword", "")
+        
         processed_domains = set()
-
+        keyword = target_config.get("keyword", "")
+        
         for container in containers:
-            for link in container.find_all("a"):
-                # Process link attributes
-                link_attrs = process_link_attributes(link)
-
-                # Extract context
-                context = extract_context(link)
-
-                # Process URLs
-                url_components = []
-                if link_attrs["href"]:
-                    url_components.extend(
-                        process_url(link_attrs["href"], processed_domains)
+            # Find all links in the container
+            links = container.find_all("a")
+            logger.info(f"Found {len(links)} links in container")
+            
+            for link in links:
+                try:
+                    # Process link attributes
+                    link_attrs = process_link_attributes(link)
+                    if not link_attrs["href"]:
+                        continue
+                        
+                    # Extract context
+                    context = extract_context(link)
+                    
+                    # Process URL components
+                    url_components = process_url(link_attrs["href"], processed_domains)
+                    
+                    # Collect text components
+                    text_components = collect_text_components(
+                        link_attrs,
+                        metadata,
+                        context,
+                        url_components
                     )
-                if target_config.get("url"):
-                    url_components.extend(
-                        process_url(target_config["url"], processed_domains)
+                    
+                    # Create link data
+                    link_data = create_link_data(
+                        link_attrs=link_attrs,
+                        keyword=keyword,
+                        context=context,
+                        metadata=metadata,
+                        source_url=target_config["url"],
+                        processed_text=" ".join(text_components)
                     )
-
-                # Collect all text components
-                text_parts = collect_text_components(
-                    link_attrs, metadata, context, url_components
-                )
-
-                # Create final link data
-                link_data = create_link_data(
-                    link_attrs,
-                    keyword,
-                    context,
-                    metadata,
-                    target_config.get("url", ""),
-                    " ".join(text_parts),
-                )
-                results.append(link_data)
-
+                    
+                    results.append(link_data)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing link: {str(e)}", exc_info=True)
+                    continue
+                    
+        logger.info(f"Successfully parsed {len(results)} links")
+        return results
+        
     except Exception as e:
-        print(f"Error: Error parsing content: {str(e)}")
-    return results
+        logger.error(f"Error parsing content: {str(e)}", exc_info=True)
+        return results
 
 
 def scrape_target(
@@ -297,47 +313,53 @@ def scrape_target(
     timeout: int,
     retry_count: int,
 ) -> List[Dict[str, Any]]:
-    """Scrape a single target based on configuration."""
-    url = target_config.get("url")
-    if not url:
-        print("Error: Target missing URL")
-        return []
+    """Scrape a single target URL."""
+    results = []
+    try:
+        url = target_config.get("url")
+        if not url:
+            logger.error("No URL specified in target config")
+            return results
 
-    print(f"Info: Scraping target: {url}")
+        logger.info(f"Fetching content from {url}")
+        html = fetch_with_requests(url, headers, timeout, retry_count)
+        if not html:
+            logger.error(f"Failed to fetch content from {url}")
+            return results
 
-    # Apply rate limiting
-    time.sleep(random.uniform(2, 5))
+        logger.info(f"Parsing content from {url}")
+        results = parse_content(html, target_config)
+        logger.info(f"Found {len(results)} items from {url}")
 
-    # Fetch content
-    html = fetch_with_requests(url, headers, timeout, retry_count)
-    if not html:
-        return []
+    except Exception as e:
+        logger.error(f"Error scraping target {url}: {str(e)}", exc_info=True)
 
-    # Parse content
-    return parse_content(html, target_config)
+    return results
 
 
 def scrape(config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """Scrape all configured targets."""
+    """Main scraping function that processes all targets in the config."""
+    results = []
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
     timeout = 30
     retry_count = 3
 
-    all_results = []
     try:
-        for target_config in config.get("targets", []):
-            results = scrape_target(target_config, headers, timeout, retry_count)
-            if results:
-                print(
-                    f"Info: Scraped {len(results)} items from {target_config.get('url')}"
-                )
-                all_results.extend(results)
-            else:
-                print(f"Warning: No results from {target_config.get('url')}")
+        targets = config.get("targets", [])
+        if not targets:
+            logger.error("No targets specified in config")
+            return results
+
+        for target in targets:
+            logger.info(f"Processing target: {target.get('url')}")
+            target_results = scrape_target(target, headers, timeout, retry_count)
+            results.extend(target_results)
+
+        logger.info(f"Scraping completed. Found {len(results)} items")
+        return results
+
     except Exception as e:
-        print(f"Error: Error during scraping: {str(e)}")
-    return all_results
+        logger.error(f"Error in main scrape function: {str(e)}", exc_info=True)
+        return results

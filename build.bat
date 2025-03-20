@@ -1,41 +1,21 @@
 @echo off
-setlocal
+echo Building and starting containers...
 
-:: Stop any existing containers first
-echo Stopping any existing containers...
-docker compose down
+REM Check if --build argument is provided
+if "%1"=="--build" (
+    echo Rebuilding containers...
+    docker-compose up --build -d
+) else (
+    echo Starting containers without rebuild...
+    docker-compose up -d
+)
 
-:: Get URL and keyword from arguments, or use defaults
-set "URL=%~1"
-if "%URL%"=="" set "URL=https://example.com"
+REM Open the web interface in the default browser
+start http://localhost:8080
 
-set "KEYWORD=%~2"
-if "%KEYWORD%"=="" set "KEYWORD=python"
+echo Done! The web interface is available at http://localhost:8080
+echo Press any key to stop the containers...
+pause
 
-:: Check if build is needed
-set "BUILD="
-if "%3"=="--build" set "BUILD=--build"
-
-:: Start Redis and PostgreSQL services
-echo 🚀 Starting Redis and PostgreSQL...
-docker compose up -d --no-deps %BUILD% redis postgres
-
-:: Run the producer first
-echo 🕷️ Running scraper...
-echo URL: %URL%
-echo Keyword: %KEYWORD%
-docker compose run --rm -e URL="%URL%" -e KEYWORD="%KEYWORD%" producer
-
-:: Run LLM processor as its own container that will exit when done
-echo 🧠 Starting LLM processor to process results...
-docker compose run --rm llm python src/llm_main.py
-
-:: Run database processor to save data to PostgreSQL
-echo 💾 Starting database processor to save results to PostgreSQL...
-docker compose run --rm db_processor python src/db_main.py
-
-:: Stop all services
-echo Stopping services...
-docker compose down
-
-endlocal
+REM Stop the containers
+docker-compose down
