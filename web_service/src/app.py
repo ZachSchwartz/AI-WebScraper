@@ -137,7 +137,7 @@ def scrape():
         db_data = db_response.json()
         logger.info(f"db service response: {db_data}")
 
-        return jsonify(llm_data)
+        return jsonify(db_data)
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {str(e)}")
         return jsonify({
