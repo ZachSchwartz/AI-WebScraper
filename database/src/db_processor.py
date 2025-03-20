@@ -91,39 +91,40 @@ class DatabaseProcessor:
         """
         try:
             # Extract data from item
-            url = item.get("href", "")
-            title = item.get("title", "")
-            text_content = item.get("processed_text", "")
-            source_url = item.get("source_url", "")
+            # url = item.get("href", "")
+            # title = item.get("title", "")
+            #text_content = item.get("processed_text", "")
+            # source_url = item.get("source_url", "")
             
-            # Validate and clean URL
-            if url.startswith('#'):
-                url = source_url
-            elif not url.startswith(('http://', 'https://')):
-                url = source_url
+            # # Validate and clean URL
+            # if url.startswith('#'):
+            #     url = source_url
+            # elif not url.startswith(('http://', 'https://')):
+            #     url = source_url
             
             # Use fallback for title if empty
-            if not title:
-                title = item.get("aria-label", "") or "Untitled"
+            # if not title:
+            #     title = item.get("aria-label", "") or "Untitled"
             
             # Extract relevance analysis if available
-            relevance_analysis = item.get("relevance_analysis", {})
-            keyword = relevance_analysis.get("keyword", "")
-            relevance_score = relevance_analysis.get("score", 0.0)
+            # relevance_analysis = item.get("relevance_analysis", {})
+            # keyword = relevance_analysis.get("keyword", "")
+            # relevance_score = relevance_analysis.get("score", 0.0)
             
-            # Create transformed item
-            processed_item = item.copy()
-            processed_item["db_analysis"] = {
-                "model_name": "database_processor",
-                "keyword": keyword,
-                "score": relevance_score,
-                "extracted_keywords": [],  # No keyword extraction in DB processor
-                "source_url": source_url,
-                "metadata_used": bool(item.get("metadata")),
-                "context_used": bool(item.get("context")),
-            }
+            # # Create transformed item
+            # processed_item = item.copy()
+            # processed_item["db_analysis"] = {
+            #     "model_name": "database_processor",
+            #     "keyword": keyword,
+            #     "score": relevance_score,
+            #     "extracted_keywords": [],  # No keyword extraction in DB processor
+            #     "source_url": source_url,
+            #     "metadata_used": bool(item.get("metadata")),
+            #     "context_used": bool(item.get("context")),
+            # }
             
-            return processed_item
+
+            return item
             
         except Exception as e:
             print(f"Error processing item: {str(e)}")

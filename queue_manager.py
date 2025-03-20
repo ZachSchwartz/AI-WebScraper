@@ -135,7 +135,7 @@ class QueueManager:
         print("Starting queue processing")
         processed_count = 0
         iteration_count = 0
-        max_iterations = getattr(self, 'max_iterations', 1000)  # Default to 1000 if not set
+        max_iterations = getattr(self, 'max_iterations', 24)  # Default to 1000 if not set
         processed_items = []
         
         try:

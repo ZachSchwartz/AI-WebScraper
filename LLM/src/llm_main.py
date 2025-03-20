@@ -119,15 +119,9 @@ def process_endpoint():
         # Initialize Redis connection
         queue_manager = QueueManager(redis_config)
         
-        # Get queue length before processing
-        input_queue_length = queue_manager.redis_client.llen(queue_manager.queue_name)
-        
         # Process items
         processor = LLMProcessor()
         processed_items = queue_manager.process_queue(lambda item: processor.process_item(item))
-        
-        # Get queue length after processing
-        processed_queue_length = queue_manager.redis_client.llen(queue_manager.processed_queue_name)
         
         return jsonify({
             'message': processed_items

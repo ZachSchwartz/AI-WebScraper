@@ -137,7 +137,27 @@ def scrape():
         db_data = db_response.json()
         logger.info(f"db service response: {db_data}")
 
-        return jsonify(db_data)
+        for attempt in range(max_retries):
+            try:
+                # Check Redis queue length
+                redis_response = requests.get(f"{DB_SERVICE_URL}/queue/status")
+                redis_response.raise_for_status()
+                queue_status = redis_response.json()
+                
+                if queue_status.get('items_ready', False):
+                    logger.info("Producer has items ready in queue")
+                    break
+                    
+                logger.info(f"Waiting for items in queue, attempt {attempt + 1}/{max_retries}")
+                time.sleep(retry_delay)
+                
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error checking queue status: {str(e)}")
+                if attempt == max_retries - 1:
+                    raise
+                time.sleep(retry_delay)
+
+        return jsonify(llm_data)
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {str(e)}")
         return jsonify({
