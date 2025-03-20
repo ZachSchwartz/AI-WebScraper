@@ -91,6 +91,7 @@ def process_endpoint():
         # Initialize database processor
         db_processor = DatabaseProcessor()
         
+        input_queue_length = queue_manager.redis_client.llen(queue_manager.queue_name)
         # Process items from the queue
         print(f"Processing items from Redis queue: {redis_config['queue_name']}")
         queue_manager.process_queue(lambda item: db_processor.process_item(item))

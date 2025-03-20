@@ -189,6 +189,7 @@ def scrape_endpoint():
         }
         logger.info(f"Queue config: {queue_config}")
         queue_manager = QueueManager(queue_config)
+        queue_manager.clear_queues()
         
         logger.info("Starting scraper")
         first_item = run_scraper(queue_manager, url, keyword)

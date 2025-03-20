@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 import json
 import os
-
+import logging
 # Create SQLAlchemy base
 Base = declarative_base()
 
@@ -139,6 +139,7 @@ class DatabaseProcessor:
             
             # Save to database
             session = self.Session()
+            logger.info(f"Attempting to save item to database: {db_item}")
             try:
                 print("\nAttempting to save to database...")
                 session.add(db_item)

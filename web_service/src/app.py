@@ -130,14 +130,14 @@ def scrape():
                     raise
                 time.sleep(retry_delay)
 
-                # Call the LLM service to get results
+        #         # Call the LLM service to get results
         logger.info("Calling db service")
         db_response = requests.post(f"{DB_SERVICE_URL}/process")
         db_response.raise_for_status()
         db_data = db_response.json()
         logger.info(f"db service response: {db_data}")
 
-        return jsonify(db_data)
+        return jsonify(llm_data)
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {str(e)}")
         return jsonify({

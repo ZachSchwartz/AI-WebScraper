@@ -130,15 +130,7 @@ def process_endpoint():
         processed_queue_length = queue_manager.redis_client.llen(queue_manager.processed_queue_name)
         
         return jsonify({
-            'message': 'LLM processing completed successfully',
-            'status': 'success',
-            'details': {
-                'items_processed': len(processed_items),
-                'input_queue_length': input_queue_length,
-                'processed_queue_length': processed_queue_length,
-                'timestamp': datetime.now().isoformat(),
-                'results': processed_items
-            }
+            'message': processed_items
         })
     except Exception as e:
         return jsonify({
