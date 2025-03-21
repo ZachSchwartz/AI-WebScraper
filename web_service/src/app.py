@@ -157,7 +157,7 @@ def scrape():
                     raise
                 time.sleep(retry_delay)
 
-        return jsonify(db_data)
+        return jsonify(llm_data)
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {str(e)}")
         return jsonify({

@@ -212,19 +212,23 @@ class LLMProcessor:
             # Extract potential keywords for additional context
             extracted_keywords = self._extract_keywords(processed_text)
 
+            # Get source URL with better fallback handling
+            source_url = item.get("source_url", "")
+            href = item.get("href", "")
+
             # Add results to item
             processed_item = item.copy()
             processed_item["relevance_analysis"] = {
-                "model_name": self.model_name,
                 "keyword": keyword,
+                "source_url": source_url,
+                "href_url": href,
                 "score": score,
-                "extracted_keywords": extracted_keywords,
-                "source_url": item.get("source_url", item.get("href", "")),
-                "metadata_used": bool(item.get("metadata")),
-                "context_used": bool(item.get("context")),
             }
 
+            # return processed_item
             return processed_item
+        
+
 
         except Exception as e:
             print(f"Error processing item: {str(e)}")

@@ -135,7 +135,7 @@ class QueueManager:
         print("Starting queue processing")
         processed_count = 0
         iteration_count = 0
-        max_iterations = getattr(self, 'max_iterations', 24)  # Default to 1000 if not set
+        max_iterations = getattr(self, 'max_iterations', 1000)  # Default to 1000 if not set
         processed_items = []
         
         try:
@@ -149,13 +149,13 @@ class QueueManager:
                             processed_item = processor(item)
                             
                             # Only update the item if we're not processing from the processed queue
-                            if self.queue_name != self.processed_queue_name:
-                                if self.update_item(processed_item):
-                                    processed_count += 1
-                                    processed_items.append(processed_item)
-                            else:
+                            # if self.queue_name != self.processed_queue_name:
+                            if self.update_item(processed_item):
                                 processed_count += 1
                                 processed_items.append(processed_item)
+                        #    else:
+                                # processed_count += 1
+                                # processed_items.append(processed_item)
                                 
                         except Exception as e:
                             print(f"Error processing item: {str(e)}")
