@@ -6,7 +6,7 @@ Takes processed items from Redis queue and stores them in SQL database.
 import os
 import sys
 from flask import Flask, request, jsonify
-from db_processor import DatabaseProcessor
+from db_processor import DatabaseProcessor, ScrapedItem
 from datetime import datetime
 
 # Add root directory to path for importing queue_manager
@@ -133,6 +133,58 @@ def process_endpoint():
             'details': {
                 'db_status': 'Error storing data in database'
             }
+        }), 500
+
+@app.route('/query', methods=['GET'])
+def query_items():
+    """Query items by keyword and source URL."""
+    try:
+        # Get query parameters
+        keyword = request.args.get('keyword')
+        source_url = request.args.get('source_url')
+        
+        if not keyword and not source_url:
+            return jsonify({
+                'error': 'At least one of keyword or source_url must be provided'
+            }), 400
+            
+        # Initialize database session
+        db_processor = DatabaseProcessor()
+        session = db_processor.Session()
+        
+        try:
+            # Build query
+            query = session.query(ScrapedItem)
+            if keyword:
+                query = query.filter(ScrapedItem.keyword == keyword)
+            if source_url:
+                query = query.filter(ScrapedItem.source_url == source_url)
+                
+            # Execute query and get results
+            results = query.all()
+            
+            # Convert results to list of dictionaries
+            items = [{
+                'id': item.id,
+                'keyword': item.keyword,
+                'source_url': item.source_url,
+                'href_url': item.href_url,
+                'relevance_score': item.relevance_score,
+                'raw_data': item.raw_data
+            } for item in results]
+            
+            return jsonify({
+                'items': items,
+                'count': len(items)
+            })
+            
+        finally:
+            session.close()
+            
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
         }), 500
 
 def main() -> None:

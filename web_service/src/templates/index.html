@@ -15,6 +15,7 @@
         }
         .card {
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
         }
         .result-card {
             display: none;
@@ -23,10 +24,15 @@
         .loading {
             display: none;
         }
+        .query-results {
+            max-height: 500px;
+            overflow-y: auto;
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Scraping Form Card -->
         <div class="card">
             <div class="card-header bg-primary text-white">
                 <h4 class="mb-0">Web Scraper Interface</h4>
@@ -65,9 +71,46 @@
                 </div>
             </div>
         </div>
+
+        <!-- Query Form Card -->
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h4 class="mb-0">Query Database</h4>
+            </div>
+            <div class="card-body">
+                <form id="queryForm">
+                    <div class="mb-3">
+                        <label for="queryUrl" class="form-label">Source URL</label>
+                        <input type="url" class="form-control" id="queryUrl" 
+                               placeholder="https://example.com">
+                    </div>
+                    <div class="mb-3">
+                        <label for="queryKeyword" class="form-label">Keyword</label>
+                        <input type="text" class="form-control" id="queryKeyword" 
+                               placeholder="Enter keyword to search">
+                    </div>
+                    <button type="submit" class="btn btn-info text-white">Search Database</button>
+                </form>
+
+                <div class="query-loading mt-3" style="display: none;">
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border text-info me-2" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <span>Searching database...</span>
+                    </div>
+                </div>
+
+                <div class="query-results mt-3" style="display: none;">
+                    <h5>Query Results</h5>
+                    <div id="queryResults"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
+        // Scraping form handler
         document.getElementById('scrapeForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -77,7 +120,6 @@
             const resultCard = document.querySelector('.result-card');
             const results = document.getElementById('results');
 
-            // Show loading, hide results
             loading.style.display = 'block';
             resultCard.style.display = 'none';
             results.innerHTML = '';
@@ -100,7 +142,6 @@
                     throw new Error(data.message || data.error || 'Failed to scrape');
                 }
 
-                // Display results
                 results.innerHTML = `
                     <div class="alert alert-success">
                         <h5>Raw Producer Response</h5>
@@ -120,6 +161,84 @@
                     </div>
                 `;
                 resultCard.style.display = 'block';
+            } finally {
+                loading.style.display = 'none';
+            }
+        });
+
+        // Query form handler
+        document.getElementById('queryForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const keyword = document.getElementById('queryKeyword').value;
+            const sourceUrl = document.getElementById('queryUrl').value;
+            const loading = document.querySelector('.query-loading');
+            const resultsDiv = document.querySelector('.query-results');
+            const queryResults = document.getElementById('queryResults');
+
+            if (!keyword && !sourceUrl) {
+                alert('Please provide at least one search parameter');
+                return;
+            }
+
+            loading.style.display = 'block';
+            resultsDiv.style.display = 'none';
+            queryResults.innerHTML = '';
+
+            try {
+                // Build query parameters
+                const params = new URLSearchParams();
+                if (keyword) params.append('keyword', keyword);
+                if (sourceUrl) params.append('source_url', sourceUrl);
+
+                const response = await fetch(`/db/query?${params.toString()}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to query database');
+                }
+
+                if (data.items.length === 0) {
+                    queryResults.innerHTML = `
+                        <div class="alert alert-info">
+                            No results found for your query.
+                        </div>
+                    `;
+                } else {
+                    const resultsHtml = data.items.map(item => `
+                        <div class="card mb-3">
+                            <div class="card-body">
+                                <h6 class="card-subtitle mb-2 text-muted">ID: ${item.id}</h6>
+                                <p><strong>Keyword:</strong> ${item.keyword}</p>
+                                <p><strong>Source URL:</strong> <a href="${item.source_url}" target="_blank">${item.source_url}</a></p>
+                                <p><strong>Href URL:</strong> <a href="${item.href_url}" target="_blank">${item.href_url}</a></p>
+                                <p><strong>Relevance Score:</strong> ${item.relevance_score}</p>
+                                <div class="mt-3">
+                                    <strong>Raw Data:</strong>
+                                    <pre class="mt-2" style="white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(item.raw_data, null, 2)}</pre>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+
+                    queryResults.innerHTML = `
+                        <div class="alert alert-success mb-3">
+                            Found ${data.count} result${data.count === 1 ? '' : 's'}
+                        </div>
+                        ${resultsHtml}
+                    `;
+                }
+
+                resultsDiv.style.display = 'block';
+            } catch (error) {
+                console.error('Error querying database:', error);
+                queryResults.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h5>Error</h5>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                resultsDiv.style.display = 'block';
             } finally {
                 loading.style.display = 'none';
             }

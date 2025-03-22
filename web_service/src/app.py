@@ -179,5 +179,29 @@ def scrape():
             'status': 'error'
         }), 500
 
+@app.route('/db/query')
+def db_query():
+    """Proxy database queries to the DB service."""
+    try:
+        # Forward query parameters to DB service
+        response = requests.get(
+            f"{DB_SERVICE_URL}/query",
+            params=request.args,
+            timeout=10
+        )
+        return jsonify(response.json()), response.status_code
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error querying database: {str(e)}")
+        return jsonify({
+            'error': 'Database service is not available',
+            'status': 'error'
+        }), 503
+    except Exception as e:
+        logger.error(f"Unexpected error during database query: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000) 
