@@ -143,11 +143,6 @@ def query_items():
         keyword = request.args.get('keyword')
         source_url = request.args.get('source_url')
         
-        if not keyword and not source_url:
-            return jsonify({
-                'error': 'At least one of keyword or source_url must be provided'
-            }), 400
-            
         # Initialize database session
         db_processor = DatabaseProcessor()
         session = db_processor.Session()
@@ -159,6 +154,9 @@ def query_items():
                 query = query.filter(ScrapedItem.keyword == keyword)
             if source_url:
                 query = query.filter(ScrapedItem.source_url == source_url)
+                
+            # Sort by relevance score in descending order
+            query = query.order_by(ScrapedItem.relevance_score.desc())
                 
             # Execute query and get results
             results = query.all()

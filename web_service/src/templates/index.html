@@ -24,7 +24,7 @@
         .loading {
             display: none;
         }
-        .query-results {
+        .query-results, .scrape-results {
             max-height: 500px;
             overflow-y: auto;
         }
@@ -61,13 +61,9 @@
                     </div>
                 </div>
 
-                <div class="result-card card">
-                    <div class="card-header bg-success text-white">
-                        <h5 class="mb-0">Scraping Results</h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="results"></div>
-                    </div>
+                <div class="scrape-results mt-3" style="display: none;">
+                    <h5>Scraping Results</h5>
+                    <div id="results"></div>
                 </div>
             </div>
         </div>
@@ -117,11 +113,11 @@
             const url = document.getElementById('url').value;
             const keyword = document.getElementById('keyword').value;
             const loading = document.querySelector('.loading');
-            const resultCard = document.querySelector('.result-card');
+            const resultsDiv = document.querySelector('.scrape-results');
             const results = document.getElementById('results');
 
             loading.style.display = 'block';
-            resultCard.style.display = 'none';
+            resultsDiv.style.display = 'none';
             results.innerHTML = '';
 
             try {
@@ -144,14 +140,29 @@
 
                 results.innerHTML = `
                     <div class="alert alert-success">
-                        <h5>Raw Producer Response</h5>
-                        <pre class="mt-3" style="white-space: pre-wrap; word-wrap: break-word;">
-                            ${JSON.stringify(data, null, 2)}
-                        </pre>
+                        <h6>Found ${data.count} results for "${data.keyword}" on ${data.source_url}</h6>
+                        <div class="mt-3">
+                            ${data.results.map((item, index) => `
+                                <div class="card mb-2">
+                                    <div class="card-body py-2">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <div class="text-truncate me-3">
+                                                <a href="${item.url}" target="_blank" class="text-decoration-none">
+                                                    ${item.url}
+                                                </a>
+                                            </div>
+                                            <span class="badge bg-primary">
+                                                Score: ${(item.score * 100).toFixed(1)}%
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
                     </div>
                 `;
 
-                resultCard.style.display = 'block';
+                resultsDiv.style.display = 'block';
             } catch (error) {
                 console.error('Error during scraping:', error);
                 results.innerHTML = `
@@ -160,7 +171,7 @@
                         <p>${error.message}</p>
                     </div>
                 `;
-                resultCard.style.display = 'block';
+                resultsDiv.style.display = 'block';
             } finally {
                 loading.style.display = 'none';
             }
@@ -175,11 +186,6 @@
             const loading = document.querySelector('.query-loading');
             const resultsDiv = document.querySelector('.query-results');
             const queryResults = document.getElementById('queryResults');
-
-            if (!keyword && !sourceUrl) {
-                alert('Please provide at least one search parameter');
-                return;
-            }
 
             loading.style.display = 'block';
             resultsDiv.style.display = 'none';

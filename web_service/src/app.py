@@ -165,7 +165,25 @@ def scrape():
                     raise
                 time.sleep(retry_delay)
 
-        return jsonify(llm_data)
+        links = []
+        if isinstance(db_data.get('message'), list):
+            for item in db_data['message']:
+                if isinstance(item, dict) and 'relevance_analysis' in item:
+                    analysis = item['relevance_analysis']
+                    links.append({
+                        'url': analysis.get('href_url', ''),
+                        'score': analysis.get('score', 0)
+                    })
+        
+        # Sort links by score in descending order
+        links.sort(key=lambda x: float(x['score'] or 0), reverse=True)
+
+        return jsonify({
+            'source_url': url,
+            'keyword': keyword,
+            'results': links,
+            'count': len(links)
+        })
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {str(e)}")
         return jsonify({
