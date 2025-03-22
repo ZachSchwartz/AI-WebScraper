@@ -74,9 +74,17 @@ def scrape():
             json={'url': url, 'keyword': keyword},
             timeout=30  # Add timeout
         )
-        producer_response.raise_for_status()
+        
+        # Get the response data
         producer_data = producer_response.json()
         logger.info(f"Producer service response: {producer_data}")
+        
+        # If there was any error, return the user-friendly message
+        if not producer_response.ok or (isinstance(producer_data, dict) and "error" in producer_data):
+            return jsonify({
+                "error": producer_data.get("error", "scraping_failed"),
+                "message": producer_data.get("message", "An unknown error occurred while scraping")
+            }), 400
 
         # Wait for producer to finish processing by checking Redis queue
         logger.info("Waiting for producer to finish processing...")

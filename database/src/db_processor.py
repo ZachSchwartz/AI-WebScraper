@@ -17,13 +17,10 @@ class ScrapedItem(Base):
     __tablename__ = "scraped_items"
     
     id = sa.Column(sa.Integer, primary_key=True)
-    url = sa.Column(sa.String, nullable=False)
-    title = sa.Column(sa.String, nullable=True)
-    text_content = sa.Column(sa.Text, nullable=True)
-    source_url = sa.Column(sa.String, nullable=True)
     keyword = sa.Column(sa.String, nullable=True)
+    source_url = sa.Column(sa.String, nullable=False)
+    href_url = sa.Column(sa.String, nullable=True)
     relevance_score = sa.Column(sa.Float, nullable=True)
-    processed_date = sa.Column(sa.DateTime, default=sa.func.now())
     raw_data = sa.Column(sa.JSON, nullable=True)
     
     def __repr__(self):
@@ -92,7 +89,7 @@ class DatabaseProcessor:
             # Extract data from item
             keyword = relevance_analysis.get("keyword", "")
             source_url = relevance_analysis.get("source_url", "")
-            href_url = relevance_analysis.get("scraped_url", "")
+            href_url = relevance_analysis.get("href_url", "")
             score = relevance_analysis.get("score", "")
             
             # Create new database item

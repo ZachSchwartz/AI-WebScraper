@@ -5,7 +5,7 @@ Main entry point for the web scraper producer.
 import argparse
 import os
 import sys
-from typing import Optional
+from typing import Optional, Dict, Any
 import requests
 from flask import Flask, request, jsonify
 from scraper import scrape
@@ -40,7 +40,7 @@ def get_redis_client():
 
 def run_scraper(
     queue_manager: QueueManager, target_url: str, target_keyword: str
-) -> None:
+) -> Dict[str, Any]:
     """Run the scraper and publish results to the queue."""
     try:
         print("Starting scraping job")
@@ -75,40 +75,58 @@ def run_scraper(
         }
 
         # Call the standalone scrape function
-        results = scrape(scraper_config)
-        if results:
-            print(f"Scraped {len(results)} items")
+        result = scrape(scraper_config)
+        
+        # Check if we got an error response
+        if isinstance(result, dict):
+            if "error" in result:
+                return {
+                    "error": "scraping_failed",
+                    "message": "Please check if url is spelled correctly, or website may not allow scraping"
+                }
+            elif "results" in result:
+                results = result["results"]
+                if results:
+                    print(f"Scraped {len(results)} items")
 
-            # Publish results to the queue
-            for item in results:
-                queue_manager.publish_item(item)
+                    # Publish results to the queue
+                    for item in results:
+                        queue_manager.publish_item(item)
 
-            print(f"Published {len(results)} items to queue")
-            
-            # Get the first item from the queue using rpop (FIFO order)
-            redis_client = get_redis_client()
-            queue_name = "scraped_items"
-            item_json = redis_client.rpop(queue_name)
-            
-            if item_json:
-                first_item = json.loads(item_json)
-                # Push the item back to the front of the queue since we want to keep it
-                redis_client.lpush(queue_name, item_json)
-                return first_item
-            else:
-                print("No items found in queue after publishing")
-                return None
+                    print(f"Published {len(results)} items to queue")
+                    
+                    # Get the first item from the queue using rpop (FIFO order)
+                    redis_client = get_redis_client()
+                    queue_name = "scraped_items"
+                    item_json = redis_client.rpop(queue_name)
+                    
+                    if item_json:
+                        first_item = json.loads(item_json)
+                        # Push the item back to the front of the queue since we want to keep it
+                        redis_client.lpush(queue_name, item_json)
+                        return first_item
+                    else:
+                        return {
+                            "error": "scraping_failed",
+                            "message": "Please check if url is spelled correctly, or website may not allow scraping"
+                        }
+                else:
+                    return {
+                        "error": "scraping_failed",
+                        "message": "Please check if url is spelled correctly, or website may not allow scraping"
+                    }
 
-        else:
-            print("No results found during scraping")
-            return None
+        return {
+            "error": "scraping_failed",
+            "message": "Please check if url is spelled correctly, or website may not allow scraping"
+        }
 
-    except (requests.exceptions.RequestException, ValueError) as e:
-        print(f"Error in scraping job: {str(e)}")
-        raise
     except Exception as e:
-        print(f"Unexpected error in scraping job: {str(e)}")
-        raise
+        logger.error(f"Error in scraping job: {str(e)}", exc_info=True)
+        return {
+            "error": "scraping_failed",
+            "message": "Please check if url is spelled correctly, or website may not allow scraping"
+        }
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -177,7 +195,7 @@ def scrape_endpoint():
     
     if not url or not keyword:
         logger.error("Missing URL or keyword in request")
-        return jsonify({'error': 'URL and keyword are required'}), 400
+        return jsonify({'error': 'missing_parameters', 'message': 'URL and keyword are required'}), 400
     
     try:
         logger.info("Initializing queue manager")
@@ -191,21 +209,27 @@ def scrape_endpoint():
         queue_manager = QueueManager(queue_config)
         
         logger.info("Starting scraper")
-        first_item = run_scraper(queue_manager, url, keyword)
+        result = run_scraper(queue_manager, url, keyword)
         
-        if first_item:
-            # Return just the scraped data without any wrapper
-            return jsonify(first_item)
+        # Check if we got an error response
+        if isinstance(result, dict) and "error" in result:
+            return jsonify(result), 400
+            
+        # If we have a valid result, return it
+        if result:
+            return jsonify(result)
         else:
             return jsonify({
-                'error': 'No items found after scraping'
-            }), 404
+                "error": "scraping_failed",
+                "message": "Please check if url is spelled correctly, or website may not allow scraping"
+            }), 400
         
     except Exception as e:
         logger.error(f"Error in scraping endpoint: {str(e)}", exc_info=True)
         return jsonify({
-            'error': str(e)
-        }), 500
+            "error": "scraping_failed",
+            "message": "Please check if url is spelled correctly, or website may not allow scraping"
+        }), 400
 
 def main(target_url: str, target_keyword: str) -> None:
     """Main entry point for the scraper when run directly."""

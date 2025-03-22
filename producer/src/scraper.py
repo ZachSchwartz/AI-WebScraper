@@ -31,25 +31,34 @@ def is_allowed_by_robots(url: str, user_agent: str) -> bool:
 
 def fetch_with_requests(
     url: str, headers: Dict[str, str], timeout: int, retry_count: int
-) -> Optional[str]:
+) -> Optional[Dict[str, Any]]:
     """Fetch URL content using requests library with rate limiting."""
     if not is_allowed_by_robots(url, headers["User-Agent"]):
-        print(f"Info: Skipping {url} (disallowed by robots.txt)")
-        return None
+        logger.info(f"Skipping {url} (disallowed by robots.txt)")
+        return {
+            "error": "robots_txt_disallowed",
+            "message": f"URL {url} is disallowed by robots.txt",
+            "url": url
+        }
 
     for attempt in range(retry_count):
         try:
             response = requests.get(url, headers=headers, timeout=timeout)
             response.raise_for_status()
-            return response.text
+            return {"content": response.text}
         except requests.exceptions.RequestException as e:
-            print(
+            logger.warning(
                 f"Warning: Attempt {attempt + 1}/{retry_count} failed for {url}: {str(e)}"
             )
             if attempt < retry_count - 1:
                 time.sleep(2**attempt)  # Exponential backoff
+            elif attempt == retry_count - 1:
+                return {
+                    "error": "request_failed",
+                    "message": f"Failed to fetch {url} after {retry_count} attempts: {str(e)}",
+                    "url": url
+                }
 
-    print(f"Error: Failed to fetch {url} after {retry_count} attempts")
     return None
 
 
@@ -312,34 +321,41 @@ def scrape_target(
     headers: Dict[str, str],
     timeout: int,
     retry_count: int,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """Scrape a single target URL."""
-    results = []
+    
     try:
         url = target_config.get("url")
         if not url:
             logger.error("No URL specified in target config")
-            return results
+            return {"error": "missing_url", "message": "No URL specified in target config"}
 
         logger.info(f"Fetching content from {url}")
-        html = fetch_with_requests(url, headers, timeout, retry_count)
-        if not html:
+        response = fetch_with_requests(url, headers, timeout, retry_count)
+        
+        if not response:
             logger.error(f"Failed to fetch content from {url}")
-            return results
-
-        logger.info(f"Parsing content from {url}")
-        results = parse_content(html, target_config)
-        logger.info(f"Found {len(results)} items from {url}")
+            return {"error": "fetch_failed", "message": f"Failed to fetch content from {url}"}
+            
+        # If there was an error during fetching (like robots.txt disallowed)
+        if "error" in response:
+            return response
+            
+        # If we have content, parse it
+        if "content" in response:
+            results = parse_content(response["content"], target_config)
+            logger.info(f"Found {len(results)} items from {url}")
+            return {"results": results}
 
     except Exception as e:
         logger.error(f"Error scraping target {url}: {str(e)}", exc_info=True)
+        return {"error": "scraping_error", "message": str(e), "url": url}
 
-    return results
+    return {"error": "unknown_error", "message": "Unknown error occurred during scraping"}
 
 
-def scrape(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+def scrape(config: Dict[str, Any]) -> Dict[str, Any]:
     """Main scraping function that processes all targets in the config."""
-    results = []
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
@@ -350,16 +366,24 @@ def scrape(config: Dict[str, Any]) -> List[Dict[str, Any]]:
         targets = config.get("targets", [])
         if not targets:
             logger.error("No targets specified in config")
-            return results
+            return {"error": "missing_targets", "message": "No targets specified in config"}
 
-        for target in targets:
-            logger.info(f"Processing target: {target.get('url')}")
-            target_results = scrape_target(target, headers, timeout, retry_count)
-            results.extend(target_results)
+        # Since we're only processing one target at a time in practice,
+        # we can return the error response directly
+        target = targets[0]
+        logger.info(f"Processing target: {target.get('url')}")
+        target_result = scrape_target(target, headers, timeout, retry_count)
+        
+        # If there's an error, propagate it up
+        if isinstance(target_result, dict) and "error" in target_result:
+            return target_result
+            
+        # If we have results, return them
+        if "results" in target_result:
+            return target_result
 
-        logger.info(f"Scraping completed. Found {len(results)} items")
-        return results
+        return {"error": "unknown_error", "message": "Unknown error occurred during scraping"}
 
     except Exception as e:
         logger.error(f"Error in main scrape function: {str(e)}", exc_info=True)
-        return results
+        return {"error": "scraping_error", "message": str(e)}

@@ -97,7 +97,7 @@
                 console.log('Response data:', data);
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Failed to scrape');
+                    throw new Error(data.message || data.error || 'Failed to scrape');
                 }
 
                 // Display results
@@ -117,8 +117,6 @@
                     <div class="alert alert-danger">
                         <h5>Error</h5>
                         <p>${error.message}</p>
-                        <hr>
-                        <p>Please check the console for more details.</p>
                     </div>
                 `;
                 resultCard.style.display = 'block';
