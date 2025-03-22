@@ -211,27 +211,28 @@
                         </div>
                     `;
                 } else {
-                    const resultsHtml = data.items.map(item => `
-                        <div class="card mb-3">
-                            <div class="card-body">
-                                <h6 class="card-subtitle mb-2 text-muted">ID: ${item.id}</h6>
-                                <p><strong>Keyword:</strong> ${item.keyword}</p>
-                                <p><strong>Source URL:</strong> <a href="${item.source_url}" target="_blank">${item.source_url}</a></p>
-                                <p><strong>Href URL:</strong> <a href="${item.href_url}" target="_blank">${item.href_url}</a></p>
-                                <p><strong>Relevance Score:</strong> ${item.relevance_score}</p>
-                                <div class="mt-3">
-                                    <strong>Raw Data:</strong>
-                                    <pre class="mt-2" style="white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(item.raw_data, null, 2)}</pre>
-                                </div>
+                    queryResults.innerHTML = `
+                        <div class="alert alert-success">
+                            <h6>Found ${data.count} results for "${data.items[0].keyword}" on ${data.items[0].source_url}</h6>
+                            <div class="mt-3">
+                                ${data.items.map((item, index) => `
+                                    <div class="card mb-2">
+                                        <div class="card-body py-2">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div class="text-truncate me-3">
+                                                    <a href="${item.href_url}" target="_blank" class="text-decoration-none">
+                                                        ${item.href_url}
+                                                    </a>
+                                                </div>
+                                                <span class="badge bg-primary">
+                                                    Score: ${(item.relevance_score * 100).toFixed(1)}%
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `).join('')}
                             </div>
                         </div>
-                    `).join('');
-
-                    queryResults.innerHTML = `
-                        <div class="alert alert-success mb-3">
-                            Found ${data.count} result${data.count === 1 ? '' : 's'}
-                        </div>
-                        ${resultsHtml}
                     `;
                 }
 

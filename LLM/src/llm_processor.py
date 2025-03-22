@@ -3,20 +3,16 @@ Relevance processor using sentence transformers for fast text analysis and relev
 with improved caching to prevent repeated downloads.
 """
 
-from typing import Dict, Any, Tuple, List
+from typing import Dict, Any, List
 from urllib.parse import urlparse
 import os
 import hashlib
-import re
 import torch
 
 import numpy as np
 
 
-
 from sentence_transformers import SentenceTransformer, util
-
-
 
 
 class LLMProcessor:
@@ -89,7 +85,7 @@ class LLMProcessor:
         """
         Generate a relevance score between 0 and 1 for the text relative to the keyword.
         Uses semantic analysis with sentence transformers and intelligent scoring.
-        
+
         Args:
             text: Text to analyze
             keyword: Keyword to compare against
@@ -143,20 +139,7 @@ class LLMProcessor:
         # Apply a sigmoid transformation
         score = 1 / (1 + np.exp(-10 * (score - 0.6)))
 
-        # Add a final threshold to push scores towards extremes
-        if score > 0.7:
-            score = 1.0
-        elif score < 0.3:
-            score = 0.0
-
         return score
-
-    def _extract_keywords(self, text: str) -> List[str]:
-        """Extract potential keywords from text for additional context."""
-        # Simple keyword extraction based on capitalized words and phrases
-        # This helps provide additional context for relevance scoring
-        words = re.findall(r"\b[A-Z][a-zA-Z]*\b", text)
-        return list(set(words))[:5]  # Return up to 5 unique keywords
 
     def _parse_url(self, url: str) -> List[str]:
         """
@@ -201,7 +184,7 @@ class LLMProcessor:
             # Get the keyword and pre-processed text
             keyword = item.get("keyword", "").lower()
             processed_text = item.get("processed_text", "")
-            
+
             # Try alternative text fields if processed_text is empty
             if not processed_text:
                 processed_text = item.get("text", item.get("content", ""))
@@ -209,12 +192,11 @@ class LLMProcessor:
             # Generate relevance score
             score = self.generate_relevance_score(processed_text, keyword)
 
-            # Extract potential keywords for additional context
-            extracted_keywords = self._extract_keywords(processed_text)
-
             # Get source URL with better fallback handling
             source_url = item.get("source_url", "")
             href = item.get("href", "")
+            if "http" not in href:
+                href = source_url + href
 
             # Add results to item
             processed_item = item.copy()
@@ -227,8 +209,6 @@ class LLMProcessor:
 
             # return processed_item
             return processed_item
-        
-
 
         except Exception as e:
             print(f"Error processing item: {str(e)}")
