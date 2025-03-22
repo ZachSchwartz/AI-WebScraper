@@ -189,18 +189,23 @@ def scrape():
 
 @app.route("/db/query")
 def db_query():
-    """Proxy database queries to the DB service.
-    
-    Acts as a proxy endpoint that forwards query parameters to the database service
-    and returns the results. Handles connection errors and service availability issues
-    with appropriate status codes.
-    
-    Returns:
-        tuple: JSON response from database service and HTTP status code
-    """
+    """Proxy database queries to the DB service."""
     try:
         return make_service_request(
             DB_SERVICE_URL, "query", method="GET", params=request.args
+        )
+    except Exception as e:
+        return create_error_response(
+            e, 503 if isinstance(e, requests.exceptions.RequestException) else 500
+        )
+
+
+@app.route("/db/query/href")
+def db_query_href():
+    """Proxy href URL queries to the DB service."""
+    try:
+        return make_service_request(
+            DB_SERVICE_URL, "query/href", method="GET", params=request.args
         )
     except Exception as e:
         return create_error_response(

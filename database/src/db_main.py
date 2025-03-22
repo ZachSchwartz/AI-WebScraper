@@ -168,6 +168,44 @@ def query_items():
         return jsonify({"error": str(e), "status": "error"}), 500
 
 
+@app.route("/query/href", methods=["GET"])
+def query_by_href():
+    """Query item details by href URL."""
+    try:
+        # Get href URL from query parameters
+        href_url = request.args.get("href_url")
+        
+        if not href_url:
+            return jsonify({"error": "href_url parameter is required"}), 400
+
+        # Initialize database session
+        db_processor = DatabaseProcessor()
+        session = db_processor.session()
+
+        try:
+            # Query for the item with matching href_url
+            item = session.query(ScrapedItem).filter(ScrapedItem.href_url == href_url).first()
+
+            if not item:
+                return jsonify({"error": "No item found with the specified href URL"}), 404
+
+            # Return the relevant information
+            result = {
+                "href_url": item.href_url,
+                "source_url": item.source_url,
+                "keyword": item.keyword,
+                "relevance_score": item.relevance_score
+            }
+
+            return jsonify(result)
+
+        finally:
+            session.close()
+
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 500
+
+
 def main() -> None:
     """Initialize and run the database processor."""
     # Check if we're running in API mode (no arguments)

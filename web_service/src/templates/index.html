@@ -103,6 +103,37 @@
                 </div>
             </div>
         </div>
+
+        <!-- Href URL Query Form Card -->
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0">Query by URL</h4>
+            </div>
+            <div class="card-body">
+                <form id="hrefQueryForm">
+                    <div class="mb-3">
+                        <label for="hrefUrl" class="form-label">URL to Look Up</label>
+                        <input type="url" class="form-control" id="hrefUrl" required
+                               placeholder="https://example.com/page">
+                    </div>
+                    <button type="submit" class="btn btn-success">Look Up URL</button>
+                </form>
+
+                <div class="href-query-loading mt-3" style="display: none;">
+                    <div class="d-flex align-items-center">
+                        <div class="spinner-border text-success me-2" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <span>Looking up URL...</span>
+                    </div>
+                </div>
+
+                <div class="href-query-results mt-3" style="display: none;">
+                    <h5>URL Details</h5>
+                    <div id="hrefQueryResults"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -248,6 +279,58 @@
                 resultsDiv.style.display = 'block';
             } catch (error) {
                 console.error('Error querying database:', error);
+                queryResults.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h5>Error</h5>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                resultsDiv.style.display = 'block';
+            } finally {
+                loading.style.display = 'none';
+            }
+        });
+
+        // Href URL query form handler
+        document.getElementById('hrefQueryForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const hrefUrl = document.getElementById('hrefUrl').value;
+            const loading = document.querySelector('.href-query-loading');
+            const resultsDiv = document.querySelector('.href-query-results');
+            const queryResults = document.getElementById('hrefQueryResults');
+
+            loading.style.display = 'block';
+            resultsDiv.style.display = 'none';
+            queryResults.innerHTML = '';
+
+            try {
+                const response = await fetch(`/db/query/href?href_url=${encodeURIComponent(hrefUrl)}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to query URL');
+                }
+
+                queryResults.innerHTML = `
+                    <div class="alert alert-success">
+                        <h6>URL Details Found</h6>
+                        <div class="mt-3">
+                            <div class="card">
+                                <div class="card-body">
+                                    <p class="mb-2"><strong>URL:</strong> <a href="${data.href_url}" target="_blank">${data.href_url}</a></p>
+                                    <p class="mb-2"><strong>Source:</strong> ${data.source_url}</p>
+                                    <p class="mb-2"><strong>Keyword:</strong> ${data.keyword}</p>
+                                    <p class="mb-0"><strong>Relevance Score:</strong> ${(data.relevance_score * 100).toFixed(1)}%</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                resultsDiv.style.display = 'block';
+            } catch (error) {
+                console.error('Error querying URL:', error);
                 queryResults.innerHTML = `
                     <div class="alert alert-danger">
                         <h5>Error</h5>
