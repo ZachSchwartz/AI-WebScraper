@@ -1,6 +1,15 @@
 @echo off
 echo Building and starting containers...
 
+REM Check if --delete_db argument is provided
+if "%1"=="--delete_db" (
+    echo Deleting the database volume and stopping containers...
+    docker-compose down
+    docker volume rm ai-webscraper_postgres_data
+    echo Database volume deleted and containers stopped.
+    exit /b
+)
+
 REM Check if --build argument is provided
 if "%1"=="--build" (
     echo Rebuilding containers...
