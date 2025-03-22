@@ -3,14 +3,13 @@ Web scraper module for collecting data from target websites.
 """
 
 import time
-import random
 import re
+import logging
 from typing import Dict, List, Any, Optional, Set
 from urllib.robotparser import RobotFileParser
 from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
-import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,11 +33,11 @@ def fetch_with_requests(
 ) -> Optional[Dict[str, Any]]:
     """Fetch URL content using requests library with rate limiting."""
     if not is_allowed_by_robots(url, headers["User-Agent"]):
-        logger.info(f"Skipping {url} (disallowed by robots.txt)")
+        logger.info("Skipping %s (disallowed by robots.txt)", url)
         return {
             "error": "robots_txt_disallowed",
             "message": f"URL {url} is disallowed by robots.txt",
-            "url": url
+            "url": url,
         }
 
     for attempt in range(retry_count):
@@ -48,7 +47,11 @@ def fetch_with_requests(
             return {"content": response.text}
         except requests.exceptions.RequestException as e:
             logger.warning(
-                f"Warning: Attempt {attempt + 1}/{retry_count} failed for {url}: {str(e)}"
+                "Warning: Attempt %d/%d failed for %s: %s",
+                attempt + 1,
+                retry_count,
+                url,
+                str(e)
             )
             if attempt < retry_count - 1:
                 time.sleep(2**attempt)  # Exponential backoff
@@ -56,7 +59,7 @@ def fetch_with_requests(
                 return {
                     "error": "request_failed",
                     "message": f"Failed to fetch {url} after {retry_count} attempts: {str(e)}",
-                    "url": url
+                    "url": url,
                 }
 
     return None
@@ -67,24 +70,23 @@ def clean_text(text: str) -> Optional[str]:
     if not text:
         return None
     text = text.strip()
-    
+
     # Filter out common unwanted messages
-    if text.lower() in {
-        "more information...",
-        "click here",
-        "read more"
-    }:
+    if text.lower() in {"more information...", "click here", "read more"}:
         return None
-        
+
     # Filter JavaScript warning messages with flexible matching
     text_lower = text.lower()
-    if any(phrase in text_lower for phrase in [
-        "javascript is not essential",
-        "turn javascript on",
-        "interaction with the content will be limited"
-    ]):
+    if any(
+        phrase in text_lower
+        for phrase in [
+            "javascript is not essential",
+            "turn javascript on",
+            "interaction with the content will be limited",
+        ]
+    ):
         return None
-        
+
     return text
 
 
@@ -262,36 +264,33 @@ def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, An
         metadata = extract_metadata(soup)
         container_selector = target_config.get("container_selector", "body")
         containers = soup.select(container_selector) if container_selector else [soup]
-        
+
         processed_domains = set()
         keyword = target_config.get("keyword", "")
-        
+
         for container in containers:
             # Find all links in the container
             links = container.find_all("a")
-            logger.info(f"Found {len(links)} links in container")
-            
+            logger.info("Found %d links in container", len(links))
+
             for link in links:
                 try:
                     # Process link attributes
                     link_attrs = process_link_attributes(link)
                     if not link_attrs["href"]:
                         continue
-                        
+
                     # Extract context
                     context = extract_context(link)
-                    
+
                     # Process URL components
                     url_components = process_url(link_attrs["href"], processed_domains)
-                    
+
                     # Collect text components
                     text_components = collect_text_components(
-                        link_attrs,
-                        metadata,
-                        context,
-                        url_components
+                        link_attrs, metadata, context, url_components
                     )
-                    
+
                     # Create link data
                     link_data = create_link_data(
                         link_attrs=link_attrs,
@@ -299,20 +298,20 @@ def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, An
                         context=context,
                         metadata=metadata,
                         source_url=target_config["url"],
-                        processed_text=" ".join(text_components)
+                        processed_text=" ".join(text_components),
                     )
-                    
+
                     results.append(link_data)
-                    
+
                 except Exception as e:
-                    logger.error(f"Error processing link: {str(e)}", exc_info=True)
+                    logger.error("Error processing link: %s", str(e), exc_info=True)
                     continue
-                    
-        logger.info(f"Successfully parsed {len(results)} links")
+
+        logger.info("Successfully parsed %d links", len(results))
         return results
-        
+
     except Exception as e:
-        logger.error(f"Error parsing content: {str(e)}", exc_info=True)
+        logger.error("Error parsing content: %s", str(e))
         return results
 
 
@@ -323,35 +322,44 @@ def scrape_target(
     retry_count: int,
 ) -> Dict[str, Any]:
     """Scrape a single target URL."""
-    
+
     try:
         url = target_config.get("url")
         if not url:
             logger.error("No URL specified in target config")
-            return {"error": "missing_url", "message": "No URL specified in target config"}
+            return {
+                "error": "missing_url",
+                "message": "No URL specified in target config",
+            }
 
-        logger.info(f"Fetching content from {url}")
+        logger.info("Fetching content from %s", url)
         response = fetch_with_requests(url, headers, timeout, retry_count)
-        
+
         if not response:
-            logger.error(f"Failed to fetch content from {url}")
-            return {"error": "fetch_failed", "message": f"Failed to fetch content from {url}"}
-            
+            logger.error("Failed to fetch content from %s", url)
+            return {
+                "error": "fetch_failed",
+                "message": f"Failed to fetch content from {url}",
+            }
+
         # If there was an error during fetching (like robots.txt disallowed)
         if "error" in response:
             return response
-            
+
         # If we have content, parse it
         if "content" in response:
             results = parse_content(response["content"], target_config)
-            logger.info(f"Found {len(results)} items from {url}")
+            logger.info("Found %d items from %s", len(results), url)
             return {"results": results}
 
     except Exception as e:
-        logger.error(f"Error scraping target {url}: {str(e)}", exc_info=True)
+        logger.error("Error scraping target %s: %s", url, str(e), exc_info=True)
         return {"error": "scraping_error", "message": str(e), "url": url}
 
-    return {"error": "unknown_error", "message": "Unknown error occurred during scraping"}
+    return {
+        "error": "unknown_error",
+        "message": "Unknown error occurred during scraping",
+    }
 
 
 def scrape(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -366,24 +374,30 @@ def scrape(config: Dict[str, Any]) -> Dict[str, Any]:
         targets = config.get("targets", [])
         if not targets:
             logger.error("No targets specified in config")
-            return {"error": "missing_targets", "message": "No targets specified in config"}
+            return {
+                "error": "missing_targets",
+                "message": "No targets specified in config",
+            }
 
         # Since we're only processing one target at a time in practice,
         # we can return the error response directly
         target = targets[0]
-        logger.info(f"Processing target: {target.get('url')}")
+        logger.info("Processing target: %s", target.get('url'))
         target_result = scrape_target(target, headers, timeout, retry_count)
-        
+
         # If there's an error, propagate it up
         if isinstance(target_result, dict) and "error" in target_result:
             return target_result
-            
+
         # If we have results, return them
         if "results" in target_result:
             return target_result
 
-        return {"error": "unknown_error", "message": "Unknown error occurred during scraping"}
+        return {
+            "error": "unknown_error",
+            "message": "Unknown error occurred during scraping",
+        }
 
     except Exception as e:
-        logger.error(f"Error in main scrape function: {str(e)}", exc_info=True)
+        logger.error("Error in main scrape function: %s", str(e), exc_info=True)
         return {"error": "scraping_error", "message": str(e)}
