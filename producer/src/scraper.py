@@ -18,32 +18,38 @@ logger = logging.getLogger(__name__)
 
 def is_allowed_by_robots(url: str, user_agent: str) -> bool:
     """Check if the URL is allowed by robots.txt."""
-    try:
-        rp = RobotFileParser()
-        rp.set_url(url.rstrip("/") + "/robots.txt")
-        rp.read()
-        return rp.can_fetch(user_agent, url)
-    except Exception as e:
-        print(f"Warning: Error checking robots.txt for {url}: {str(e)}")
-        return True
+    rp = RobotFileParser()
+    rp.set_url(url.rstrip("/") + "/robots.txt")
+    rp.read()
+    if not rp.can_fetch(user_agent, url):
+        logger.info("Skipping %s (disallowed by robots.txt)", url)
+        raise Exception(f"URL {url} is disallowed by robots.txt")
 
 
 def fetch_with_requests(
     url: str, headers: Dict[str, str], timeout: int, retry_count: int
 ) -> Optional[Dict[str, Any]]:
     """Fetch URL content using requests library with rate limiting."""
-    if not is_allowed_by_robots(url, headers["User-Agent"]):
-        logger.info("Skipping %s (disallowed by robots.txt)", url)
+    try:
+        is_allowed_by_robots(url, headers["User-Agent"])
+    except Exception as e:
+        logger.error(f"Robots.txt error for {url}: {str(e)}")
         return {
-            "error": "robots_txt_disallowed",
-            "message": f"URL {url} is disallowed by robots.txt",
-            "url": url,
+            "error": "robots_txt_error",
+            "message": f"This website's robots.txt file does not allow scraping: {str(e)}",
+            "url": url
         }
 
     for attempt in range(retry_count):
         try:
             response = requests.get(url, headers=headers, timeout=timeout)
             response.raise_for_status()
+            if not response.text:
+                return {
+                    "error": "empty_response",
+                    "message": f"Received empty response from {url}",
+                    "url": url
+                }
             return {"content": response.text}
         except requests.exceptions.RequestException as e:
             logger.warning(
@@ -259,11 +265,24 @@ def create_link_data(
 def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Parse HTML content to extract links and context."""
     results = []
+    
+    if not html or not isinstance(html, str):
+        logger.error("Invalid HTML content received")
+        return results
+
     try:
         soup = BeautifulSoup(html, "html.parser")
+        if not soup.find():  # Check if parsed content is empty
+            logger.error("No parseable content found in HTML")
+            return results
+
         metadata = extract_metadata(soup)
         container_selector = target_config.get("container_selector", "body")
         containers = soup.select(container_selector) if container_selector else [soup]
+
+        if not containers:
+            logger.error(f"No containers found matching selector: {container_selector}")
+            return results
 
         processed_domains = set()
         keyword = target_config.get("keyword", "")

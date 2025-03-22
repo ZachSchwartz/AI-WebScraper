@@ -23,7 +23,18 @@ DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db_processor:5000")
 def create_error_response(error: Exception, status_code: int = 500):
     """Create a standardized error response"""
     logger.error("%s: %s", error.__class__.__name__, str(error))
-    return jsonify({"error": str(error), "status": "error"}), status_code
+    
+    # Create a user-friendly error message
+    if isinstance(error, requests.exceptions.RequestException):
+        message = "Unable to complete the request. Please try again later."
+    else:
+        message = str(error)
+    
+    return jsonify({
+        "error": "scraping_failed",
+        "message": message,
+        "status": "error"
+    }), status_code
 
 
 def make_service_request(
@@ -33,21 +44,51 @@ def make_service_request(
     try:
         url = f"{service_url}/{endpoint.lstrip('/')}"
         response = requests.request(method, url, timeout=10, **kwargs)
-        response.raise_for_status()
-        data = response.json()
+        
+        # Get the response data even if status code is not 200
+        try:
+            data = response.json()
+        except ValueError:
+            data = {"error": "invalid_response", "message": "Invalid response from service"}
+            
         logger.info("Service response from %s: %s", url, data)
+        
+        # If it's an error response, return it immediately
+        if not response.ok or (isinstance(data, dict) and "error" in data):
+            return data, response.status_code
+            
         return data
+        
     except requests.exceptions.RequestException as e:
-        return create_error_response(e)
+        logger.error("Request error: %s", str(e))
+        return {
+            "error": "service_error",
+            "message": "Unable to complete the request. Please try again later."
+        }, 500
 
 
 def get_response(service_url: str, url: str = None, keyword: str = None):
     """Get response from a service."""
-    if url is not None and keyword is not None:
-        return make_service_request(
-            service_url, "scrape", json={"url": url, "keyword": keyword}
-        )
-    return make_service_request(service_url, "process")
+    try:
+        if url is not None and keyword is not None:
+            response = make_service_request(
+                service_url, "scrape", json={"url": url, "keyword": keyword}
+            )
+        else:
+            response = make_service_request(service_url, "process")
+            
+        # If response is a tuple (indicating an error response), return it directly
+        if isinstance(response, tuple):
+            return response[0]  # Return just the JSON part
+        return response
+        
+    except Exception as e:
+        logger.error("Error in get_response: %s", str(e))
+        return {
+            "error": "service_error",
+            "message": "Unable to process the request. Please try again later.",
+            "status": "error"
+        }
 
 
 @app.route("/")
@@ -78,36 +119,72 @@ def scrape():
         data = request.json
         url = data.get("url")
         keyword = data.get("keyword")
+        
+        if not url or not keyword:
+            return jsonify({
+                "error": "invalid_input",
+                "message": "Both URL and keyword are required",
+                "status": "error"
+            }), 400
 
-        get_response(PRODUCER_SERVICE_URL, url, keyword)
-        get_response(LLM_SERVICE_URL)
-        db_data = get_response(DB_SERVICE_URL)
+        # Call the producer service
+        producer_response = make_service_request(
+            PRODUCER_SERVICE_URL, 
+            "scrape", 
+            json={"url": url, "keyword": keyword}
+        )
+        
+        # If producer_response is a tuple, it contains an error
+        if isinstance(producer_response, tuple):
+            error_data, status_code = producer_response
+            return jsonify(error_data), status_code
+            
+        # If producer response has an error, return it
+        if isinstance(producer_response, dict) and "error" in producer_response:
+            return jsonify(producer_response), 400
 
-        links = []
-        if isinstance(db_data.get("message"), list):
+        # Only proceed with LLM and DB if producer was successful
+        llm_response = make_service_request(LLM_SERVICE_URL, "process")
+        if isinstance(llm_response, tuple):
+            error_data, status_code = llm_response
+            return jsonify(error_data), status_code
+
+        db_data = make_service_request(DB_SERVICE_URL, "process")
+        if isinstance(db_data, tuple):
+            error_data, status_code = db_data
+            return jsonify(error_data), status_code
+
+        # Use a dictionary to track unique URLs and keep the highest score for duplicates
+        url_score_map = {}
+        if isinstance(db_data, dict) and isinstance(db_data.get("message"), list):
             for item in db_data["message"]:
                 if isinstance(item, dict) and "relevance_analysis" in item:
                     analysis = item["relevance_analysis"]
-                    links.append(
-                        {
-                            "url": analysis.get("href_url", ""),
-                            "score": analysis.get("score", 0),
-                        }
-                    )
+                    href_url = analysis.get("href_url", "")
+                    score = float(analysis.get("score", 0))
+                    
+                    # Only keep the highest score for each URL
+                    if href_url not in url_score_map or score > url_score_map[href_url]:
+                        url_score_map[href_url] = score
 
-        # Sort links by score in descending order
+        # Convert the unique URL map back to a list of dictionaries
+        links = [{"url": url, "score": score} for url, score in url_score_map.items()]
         links.sort(key=lambda x: float(x["score"] or 0), reverse=True)
 
-        return jsonify(
-            {
-                "source_url": url,
-                "keyword": keyword,
-                "results": links,
-                "count": len(links),
-            }
-        )
+        return jsonify({
+            "source_url": url,
+            "keyword": keyword,
+            "results": links,
+            "count": len(links)
+        })
+
     except Exception as e:
-        return create_error_response(e)
+        logger.error("Error in scrape endpoint: %s", str(e), exc_info=True)
+        return jsonify({
+            "error": "scraping_failed",
+            "message": "Unable to complete the scraping request. Please try again later.",
+            "status": "error"
+        }), 500
 
 
 @app.route("/db/query")

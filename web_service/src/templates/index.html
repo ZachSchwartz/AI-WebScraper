@@ -134,10 +134,19 @@
                 const data = await response.json();
                 console.log('Response data:', data);
 
-                if (!response.ok) {
-                    throw new Error(data.message || data.error || 'Failed to scrape');
+                // Always check for error in the response data
+                if (data.error) {
+                    results.innerHTML = `
+                        <div class="alert ${data.error === 'robots_txt_error' ? 'alert-warning' : 'alert-danger'}">
+                            <h5>${data.error === 'robots_txt_error' ? 'Access Denied by robots.txt' : 'Error'}</h5>
+                            <p>${data.message}</p>
+                        </div>
+                    `;
+                    resultsDiv.style.display = 'block';
+                    return;
                 }
 
+                // If no error, display results
                 results.innerHTML = `
                     <div class="alert alert-success">
                         <h6>Found ${data.count} results for "${data.keyword}" on ${data.source_url}</h6>
