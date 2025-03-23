@@ -8,12 +8,12 @@ import sys
 from flask import Flask, request, jsonify
 from db_processor import DatabaseProcessor, ScrapedItem
 
-# Add root directory to path for importing queue_manager
+# Add root directory to path for importing queue_util
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
-from queue_manager import QueueManager
-from error_util import format_error
-from health_util import perform_health_check
+from util.queue_util import QueueManager
+from util.health_util import perform_health_check
+from util.error_util import format_error
 
 app = Flask(__name__)
 
@@ -28,18 +28,18 @@ def process_endpoint():
     """API endpoint to trigger queue processing."""
     try:
         # Initialize Redis connection with processed queue
-        queue_manager = QueueManager(
+        queue_util = QueueManager(
             QueueManager.get_redis_config(queue_name="scraped_items_processed")
         )
 
         # Initialize database processor
         db_processor = DatabaseProcessor()
         # Process items from the queue
-        items = queue_manager.process_queue(
+        items = queue_util.process_queue(
             lambda item: db_processor.process_item(item)
         )
 
-        queue_manager.clear_queues()
+        queue_util.clear_queues()
 
         return jsonify({"message": items})
     except Exception as e:

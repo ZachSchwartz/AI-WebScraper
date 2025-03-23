@@ -9,7 +9,7 @@ from llm_processor import LLMProcessor
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
-from queue_manager import QueueManager
+from queue_util import QueueManager
 from error_util import format_error
 from health_util import perform_health_check
 
@@ -26,11 +26,11 @@ def process_endpoint():
     """API endpoint to trigger queue processing."""
     try:
         # Initialize Redis connection with longer wait time for LLM processing
-        queue_manager = QueueManager(QueueManager.get_redis_config(wait_time=10))
+        queue_util = QueueManager(QueueManager.get_redis_config(wait_time=10))
 
         # Process items
         processor = LLMProcessor()
-        processed_items = queue_manager.process_queue(
+        processed_items = queue_util.process_queue(
             lambda item: processor.process_item(item)
         )
 

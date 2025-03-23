@@ -17,9 +17,9 @@ logger = logging.getLogger(__name__)
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
-from queue_manager import QueueManager
-from health_util import perform_health_check
-from error_util import format_error
+from util.queue_util import QueueManager
+from util.health_util import perform_health_check
+from util.error_util import format_error
 
 app = Flask(__name__)
 
@@ -61,7 +61,7 @@ SCRAPER_CONFIG = {
 
 
 def run_scraper(
-    queue_manager: QueueManager, target_url: str, target_keyword: str
+    queue_util: QueueManager, target_url: str, target_keyword: str
 ) -> Dict[str, Any]:
     """Run the scraper and publish results to the queue."""
     print("Starting scraping job")
@@ -81,18 +81,18 @@ def run_scraper(
 
             # Publish results to the queue
             for item in results:
-                queue_manager.publish_item(item)
+                queue_util.publish_item(item)
 
             print(f"Published {len(results)} items to queue")
 
             queue_name = "scraped_items"
-            item_json = queue_manager.redis_client.rpop(queue_name)
+            item_json = queue_util.redis_client.rpop(queue_name)
 
             if item_json:
                 first_item = json.loads(item_json)
                 # Push the item back to the front of the queue since we want to keep it
-                queue_manager.redis_client.lpush(queue_name, item_json)
-                queue_manager.close()
+                queue_util.redis_client.lpush(queue_name, item_json)
+                queue_util.close()
                 return first_item
 
 
@@ -109,10 +109,10 @@ def scrape_endpoint():
     logger.info("Initializing queue manager")
     queue_config = QueueManager.get_redis_config()
     logger.info("Queue config: %s", queue_config)
-    queue_manager = QueueManager(queue_config)
+    queue_util = QueueManager(queue_config)
 
     logger.info("Starting scraper")
-    result = run_scraper(queue_manager, url, keyword)
+    result = run_scraper(queue_util, url, keyword)
 
     # Check if we got an error response
     if isinstance(result, dict) and "error" in result:
@@ -125,17 +125,17 @@ def scrape_endpoint():
 
 def main(target_url: str, target_keyword: str) -> None:
     """Main entry point for the scraper when run directly."""
-    queue_manager = QueueManager(QueueManager.get_redis_config())
+    queue_util = QueueManager(QueueManager.get_redis_config())
     print("Queue manager initialized")
 
     try:
         print(f"Scraping URL: {target_url} with keyword: {target_keyword} in main")
-        first_item = run_scraper(queue_manager, target_url, target_keyword)
+        first_item = run_scraper(queue_util, target_url, target_keyword)
         if first_item:
             print("First item from queue:")
             print(json.dumps(first_item, indent=2))
     finally:
-        queue_manager.close()
+        queue_util.close()
 
 
 if __name__ == "__main__":

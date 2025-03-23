@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
-from error_util import format_error
+from util.error_util import format_error
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

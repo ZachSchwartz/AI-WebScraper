@@ -101,7 +101,7 @@ class DatabaseProcessor:
             item: Dictionary containing processed data from LLM
 
         Returns:
-            The original item, for compatibility with queue_manager
+            The original item, for compatibility with queue_util
         """
         try:
             print("\nProcessing item from Redis queue:")
