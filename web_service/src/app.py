@@ -101,21 +101,6 @@ def make_service_request(
     return data
 
 
-def get_response(service_url: str, url: str = None, keyword: str = None):
-    """Get response from a service."""
-    if url is not None and keyword is not None:
-        response = make_service_request(
-            service_url, "scrape", json={"url": url, "keyword": keyword}
-        )
-    else:
-        response = make_service_request(service_url, "process")
-
-    # If response is a tuple (indicating an error response), return it directly
-    if isinstance(response, tuple):
-        return response[0]
-    return response
-
-
 @app.route("/")
 def index():
     """Render the main application interface.
