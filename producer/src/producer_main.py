@@ -2,13 +2,11 @@
 Main entry point for the web scraper producer.
 """
 
-import argparse
 import os
 import sys
 import logging
 import json
-from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from flask import Flask, request, jsonify
 from scraper import scrape
 
@@ -20,31 +18,15 @@ logger = logging.getLogger(__name__)
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
 from queue_manager import QueueManager
+from health_util import perform_health_check
+from error_util import format_error
 
 app = Flask(__name__)
 
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    """Health check endpoint."""
-    try:
-        # Check Redis connection
-        redis_client = QueueManager.get_redis_client()
-        redis_client.ping()
-        redis_client.close()
-
-        return jsonify(
-            {
-                "status": "healthy",
-                "service": "producer",
-                "timestamp": datetime.now().isoformat(),
-            }
-        )
-    except Exception as e:
-        return (
-            jsonify({"status": "unhealthy", "service": "producer", "error": str(e)}),
-            500,
-        )
+    return perform_health_check("producer")
 
 
 SCRAPER_CONFIG = {
@@ -91,10 +73,7 @@ def run_scraper(
     # Check if we got an error response
     if isinstance(result, dict):
         if "error" in result:
-            return {
-                "error": "scraping_failed",
-                "message": "Please check if url is spelled correctly, or website may not allow scraping",
-            }
+            return format_error("scraping_failed", "Please check if url is spelled correctly, or website may not allow scraping")
 
         results = result["results"]
         if results:
@@ -105,8 +84,6 @@ def run_scraper(
                 queue_manager.publish_item(item)
 
             print(f"Published {len(results)} items to queue")
-
-            # Get the first item from the queue using rpop (FIFO order)
 
             queue_name = "scraped_items"
             item_json = queue_manager.redis_client.rpop(queue_name)

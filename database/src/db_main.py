@@ -5,7 +5,6 @@ Takes processed items from Redis queue and stores them in SQL database.
 
 import os
 import sys
-from datetime import datetime
 from flask import Flask, request, jsonify
 from db_processor import DatabaseProcessor, ScrapedItem
 
@@ -13,32 +12,15 @@ from db_processor import DatabaseProcessor, ScrapedItem
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
 from queue_manager import QueueManager
+from error_util import format_error
+from health_util import perform_health_check
 
 app = Flask(__name__)
 
+
 @app.route("/health", methods=["GET"])
 def health_check():
-    """Health check endpoint."""
-    try:
-        # Check Redis connection
-        redis_client = QueueManager.get_redis_client()
-        redis_client.ping()
-        redis_client.close()
-
-        return jsonify(
-            {
-                "status": "healthy",
-                "service": "db_processor",
-                "timestamp": datetime.now().isoformat(),
-            }
-        )
-    except Exception as e:
-        return (
-            jsonify(
-                {"status": "unhealthy", "service": "db_processor", "error": str(e)}
-            ),
-            500,
-        )
+    return perform_health_check("db_processor")
 
 
 @app.route("/process", methods=["POST"])
@@ -56,7 +38,6 @@ def process_endpoint():
         items = queue_manager.process_queue(
             lambda item: db_processor.process_item(item)
         )
-        # items = queue_manager.read_queue(queue_manager.processed_queue_name)
 
         queue_manager.clear_queues()
 
@@ -64,11 +45,7 @@ def process_endpoint():
     except Exception as e:
         return (
             jsonify(
-                {
-                    "error": str(e),
-                    "status": "error",
-                    "details": {"db_status": "Error storing data in database"},
-                }
+                format_error(str(e), "Error storing data in database")
             ),
             500,
         )
@@ -119,7 +96,7 @@ def query_items():
             session.close()
 
     except Exception as e:
-        return jsonify({"error": str(e), "status": "error"}), 500
+        return format_error("db_query_error", str(e))
 
 
 @app.route("/query/href", methods=["GET"])
@@ -130,7 +107,7 @@ def query_by_href():
         href_url = request.args.get("href_url")
 
         if not href_url:
-            return jsonify({"error": "href_url parameter is required"}), 400
+            return jsonify(format_error("href_url parameter is required")), 400
 
         # Initialize database session
         db_processor = DatabaseProcessor()
@@ -146,7 +123,7 @@ def query_by_href():
 
             if not item:
                 return (
-                    jsonify({"error": "No item found with the specified href URL"}),
+                    jsonify(format_error("No item found with the specified href URL")),
                     404,
                 )
 
@@ -164,7 +141,7 @@ def query_by_href():
             session.close()
 
     except Exception as e:
-        return jsonify({"error": str(e), "status": "error"}), 500
+        return format_error("db_query_error", str(e))
 
 
 def main() -> None:

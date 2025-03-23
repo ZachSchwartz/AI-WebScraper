@@ -1,7 +1,8 @@
 """
 Web scraper module for collecting data from target websites.
 """
-
+import sys
+import os
 import time
 import re
 import logging
@@ -10,6 +11,10 @@ from urllib.robotparser import RobotFileParser
 from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
+
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(root_dir)
+from error_util import format_error
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,23 +38,15 @@ def fetch_with_requests(
     try:
         is_allowed_by_robots(url, headers["User-Agent"])
     except Exception as e:
-        logger.error(f"Robots.txt error for {url}: {str(e)}")
-        return {
-            "error": "robots_txt_error",
-            "message": f"This website's robots.txt file does not allow scraping: {str(e)}",
-            "url": url,
-        }
+        logger.error(f"Robots.txt error for %s: %d", url, str(e))
+        return format_error("robots_txt_error", f"This website's robots.txt file does not allow scraping: {str(e)}", url)
 
     for attempt in range(retry_count):
         try:
             response = requests.get(url, headers=headers, timeout=timeout)
             response.raise_for_status()
             if not response.text:
-                return {
-                    "error": "empty_response",
-                    "message": f"Received empty response from {url}",
-                    "url": url,
-                }
+                return format_error("empty_response", f"Received empty response from {url}", url)
             return {"content": response.text}
         except requests.exceptions.RequestException as e:
             logger.warning(
@@ -133,19 +130,16 @@ def process_url(url_str: str, processed_domains: Set[str]) -> List[str]:
 def extract_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
     """Extract and clean metadata from the page."""
     metadata = {}
-    try:
-        if soup.title:
-            metadata["title"] = clean_text(soup.title.get_text())
+    if soup.title:
+        metadata["title"] = clean_text(soup.title.get_text())
 
-        meta_description = soup.find("meta", attrs={"name": "description"})
-        if meta_description and meta_description.get("content"):
-            desc = clean_text(meta_description.get("content"))
-            if desc and len(desc) > 10:  # Only add if it's not too short
-                if len(desc) > 300:  # Truncate very long descriptions
-                    desc = desc[:300] + "..."
-                metadata["description"] = desc
-    except Exception as e:
-        print(f"Warning: Error extracting metadata: {str(e)}")
+    meta_description = soup.find("meta", attrs={"name": "description"})
+    if meta_description and meta_description.get("content"):
+        desc = clean_text(meta_description.get("content"))
+        if desc and len(desc) > 10:  # Only add if it's not too short
+            if len(desc) > 300:  # Truncate very long descriptions
+                desc = desc[:300] + "..."
+            metadata["description"] = desc
     return metadata
 
 
@@ -257,7 +251,6 @@ def create_link_data(
         "context": context,
         "metadata": metadata,
         "source_url": source_url,
-        "scraped_at": int(time.time()),
         "processed_text": processed_text,
     }
 
@@ -279,10 +272,6 @@ def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, An
         metadata = extract_metadata(soup)
         container_selector = target_config.get("container_selector", "body")
         containers = soup.select(container_selector) if container_selector else [soup]
-
-        if not containers:
-            logger.error(f"No containers found matching selector: {container_selector}")
-            return results
 
         processed_domains = set()
         keyword = target_config.get("keyword", "")
@@ -346,20 +335,14 @@ def scrape_target(
         url = target_config.get("url")
         if not url:
             logger.error("No URL specified in target config")
-            return {
-                "error": "missing_url",
-                "message": "No URL specified in target config",
-            }
+            return format_error("missing_url", "No URL specified in target config")
 
         logger.info("Fetching content from %s", url)
         response = fetch_with_requests(url, headers, timeout, retry_count)
 
         if not response:
             logger.error("Failed to fetch content from %s", url)
-            return {
-                "error": "fetch_failed",
-                "message": f"Failed to fetch content from {url}",
-            }
+            return format_error("fetch_failed", f"Failed to fetch content from {url}")
 
         # If there was an error during fetching (like robots.txt disallowed)
         if "error" in response:
@@ -373,12 +356,9 @@ def scrape_target(
 
     except Exception as e:
         logger.error("Error scraping target %s: %s", url, str(e), exc_info=True)
-        return {"error": "scraping_error", "message": str(e), "url": url}
+        return format_error("scraping_error", str(e), url)
 
-    return {
-        "error": "unknown_error",
-        "message": "Unknown error occurred during scraping",
-    }
+    return format_error("unknown_error", "Unknown error occurred during scraping")
 
 
 def scrape(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -393,10 +373,7 @@ def scrape(config: Dict[str, Any]) -> Dict[str, Any]:
         targets = config.get("targets", [])
         if not targets:
             logger.error("No targets specified in config")
-            return {
-                "error": "missing_targets",
-                "message": "No targets specified in config",
-            }
+            return format_error("missing_targets", "No targets specified in config")
 
         # Since we're only processing one target at a time in practice,
         # we can return the error response directly
@@ -412,11 +389,8 @@ def scrape(config: Dict[str, Any]) -> Dict[str, Any]:
         if "results" in target_result:
             return target_result
 
-        return {
-            "error": "unknown_error",
-            "message": "Unknown error occurred during scraping",
-        }
+        return format_error("unknown_error", "Unknown error occurred during scraping")
 
     except Exception as e:
         logger.error("Error in main scrape function: %s", str(e), exc_info=True)
-        return {"error": "scraping_error", "message": str(e)}
+        return format_error("scraping_error", str(e))

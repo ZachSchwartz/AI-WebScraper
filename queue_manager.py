@@ -7,6 +7,7 @@ import time
 import os
 from typing import Dict, Any, Optional, Callable, List
 import redis
+from error_util import format_error
 
 
 class QueueManager:
@@ -74,7 +75,7 @@ class QueueManager:
             client.ping()  # Test connection
             return client
         except redis.RedisError as e:
-            print(f"Failed to connect to Redis: {str(e)}")
+            format_error("redis_connection_error", str(e))
             raise
 
     def _connect(self) -> None:
@@ -84,7 +85,7 @@ class QueueManager:
             self.redis_client = self.get_redis_client()
             print(f"Successfully connected to Redis at {self.host}:{self.port}")
         except redis.RedisError as e:
-            print(f"Failed to connect to Redis: {str(e)}")
+            format_error("redis_connection_error", str(e))
             raise
 
     def publish_item(self, item: Dict[str, Any]) -> bool:
@@ -105,7 +106,7 @@ class QueueManager:
             self.redis_client.lpush(self.queue_name, message)
             return True
         except Exception as e:
-            print(f"Error publishing item to queue: {str(e)}")
+            format_error("redis_publish_error", str(e))
             return False
 
     def get_item(self) -> Optional[Dict[str, Any]]:
@@ -121,7 +122,7 @@ class QueueManager:
             if item_json:
                 return json.loads(item_json)
         except Exception as e:
-            print(f"Error getting item from queue: {str(e)}")
+            format_error("redis_get_item_error", str(e))
         return None
 
     def get_batch(self) -> List[Dict[str, Any]]:
@@ -156,7 +157,7 @@ class QueueManager:
             print(f"Added item to processed queue '{self.processed_queue_name}'")
             return True
         except Exception as e:
-            print(f"Error adding item to processed queue: {str(e)}")
+            format_error("redis_update_item_error", str(e))
             return False
 
     def process_queue(
@@ -195,7 +196,7 @@ class QueueManager:
                                 processed_items.append(processed_item)
 
                         except Exception as e:
-                            print(f"Error processing item: {str(e)}")
+                            print(format_error("processing_error", str(e)))
                             # Don't count failed items as processed
                             continue
                 else:
@@ -223,95 +224,6 @@ class QueueManager:
             self.redis_client.close()
             print("Redis connection closed")
 
-    def _format_dict(self, d: Dict[str, Any], indent: int = 0) -> None:
-        """Format and print a dictionary with proper indentation."""
-        for key, value in d.items():
-            indent_str = "  " * indent
-            if key == "relevance_analysis" and isinstance(value, dict):
-                # Highlight relevance analysis section
-                print(f"{indent_str}{key}:")
-                print(f"{indent_str}  {'='*40}")
-                for k, v in value.items():
-                    if k == "score":
-                        # Highlight the score with special formatting
-                        print(f"{indent_str}  {k}: {'*'*20} {v} {'*'*20}")
-                    else:
-                        print(f"{indent_str}  {k}: {v}")
-                print(f"{indent_str}  {'='*40}")
-            elif isinstance(value, dict):
-                print(f"{indent_str}{key}:")
-                self._format_dict(value, indent + 1)
-            elif isinstance(value, list):
-                print(f"{indent_str}{key}:")
-                for item in value:
-                    if isinstance(item, dict):
-                        self._format_dict(item, indent + 1)
-                    else:
-                        print(f"{indent_str}  - {item}")
-            else:
-                print(f"{indent_str}{key}: {value}")
-
-    def read_queue(self, queue_name: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Read and display items from a Redis queue.
-
-        Args:
-            queue_name: Name of the queue to read from. If None, uses self.queue_name
-
-        Returns:
-            List of items read from the queue
-        """
-        try:
-            queue_name = queue_name or self.queue_name
-
-            # Get queue length
-            queue_length = self.redis_client.llen(queue_name)
-            print(f"\nFound {queue_length} items in queue '{queue_name}'")
-            print("=" * 80)
-
-            display_count = queue_length
-            items = []
-            scores = []  # Track scores for summary
-
-            # Read and display items
-            for i in range(display_count):
-                item_json = self.redis_client.lindex(queue_name, i)
-                if item_json:
-                    try:
-                        item = json.loads(item_json)
-                        items.append(item)
-
-                        # Extract score if available
-                        if (
-                            "relevance_analysis" in item
-                            and "score" in item["relevance_analysis"]
-                        ):
-                            scores.append(item["relevance_analysis"]["score"])
-
-                        print(f"\nItem {i + 1}/{display_count}:")
-                        print("=" * 80)
-                        self._format_dict(item)
-                        print("=" * 80)
-                    except json.JSONDecodeError as e:
-                        print(f"Error decoding item {i}: {e}")
-                        print(f"Raw content: {item_json}")
-
-            # Display score summary if we have scores
-            if scores:
-                print("\nScore Summary:")
-                print("=" * 40)
-                for i, score in enumerate(scores, 1):
-                    print(f"Item {i}: {score}")
-                avg_score = sum(scores) / len(scores)
-                print(f"Average Score: {avg_score:.3f}")
-                print("=" * 40)
-
-            return items
-
-        except Exception as e:
-            print(f"Error reading queue: {e}")
-            return []
-
     def clear_queues(self) -> bool:
         """
         Clear both the main queue and processed queue.
@@ -325,5 +237,5 @@ class QueueManager:
             print("Successfully cleared both main and processed queues")
             return True
         except Exception as e:
-            print(f"Error clearing queues: {str(e)}")
+            print(format_error(str(e)))
             return False

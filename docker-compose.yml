@@ -61,6 +61,8 @@ services:
     volumes:
       - ./producer/src:/app/src
       - ./queue_manager.py:/app/queue_manager.py
+      - ./error_util.py:/app/error_util.py
+      - ./health_util.py:/app/health_util.py
     command: python src/producer_main.py
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
@@ -88,6 +90,8 @@ services:
     volumes:
       - ./LLM/src:/app/src
       - model_cache:/app/model_cache
+      - ./health_util.py:/app/health_util.py
+      - ./error_util.py:/app/error_util.py
     user: root  # Temporarily use root to ensure cache directory permissions
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
@@ -124,6 +128,8 @@ services:
     volumes:
       - ./database/src:/app/src
       - ./queue_manager.py:/app/queue_manager.py
+      - ./health_util.py:/app/health_util.py
+      - ./error_util.py:/app/error_util.py
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s

@@ -3,14 +3,18 @@ Relevance processor using sentence transformers for fast text analysis and relev
 with improved caching to prevent repeated downloads.
 """
 
-from typing import Dict, Any, List
-from urllib.parse import urlparse
+import sys
 import os
 import hashlib
 import torch
 import numpy as np
+from typing import Dict, Any, List
+from urllib.parse import urlparse
 from sentence_transformers import SentenceTransformer, util
 
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(root_dir)
+from error_util import format_error
 
 class LLMProcessor:
     """Processes text content using sentence transformers with proper caching."""
@@ -63,7 +67,7 @@ class LLMProcessor:
                 self.embedding_cache[embedding_key] = embedding
                 return embedding
             except Exception as e:
-                print(f"Error loading embedding from cache: {str(e)}")
+                format_error("embedding_load_error", str(e))
 
         # Generate new embedding
         embedding = self.model.encode(text, convert_to_numpy=True)
@@ -72,7 +76,7 @@ class LLMProcessor:
         try:
             np.save(embedding_file, embedding)
         except Exception as e:
-            print(f"Error saving embedding to cache: {str(e)}")
+            format_error("embedding_save_error", str(e))
 
         # Store in memory cache
         self.embedding_cache[embedding_key] = embedding
@@ -164,7 +168,7 @@ class LLMProcessor:
 
             return components
         except Exception as e:
-            print(f"Error parsing URL {url}: {str(e)}")
+            format_error("url_parse_error", str(e), url)
             return [url]  # Fallback to original URL if parsing fails
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
@@ -204,6 +208,6 @@ class LLMProcessor:
             return processed_item
 
         except Exception as e:
-            print(f"Error processing item: {str(e)}")
+            format_error("processing_error", str(e))
             # Return original item if processing fails
             return item
