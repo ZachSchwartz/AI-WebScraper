@@ -8,12 +8,8 @@ from urllib.parse import urlparse
 import os
 import hashlib
 import torch
-
 import numpy as np
-
-
 from sentence_transformers import SentenceTransformer, util
-
 
 class LLMProcessor:
     """Processes text content using sentence transformers with proper caching."""
@@ -184,10 +180,6 @@ class LLMProcessor:
             # Get the keyword and pre-processed text
             keyword = item.get("keyword", "").lower()
             processed_text = item.get("processed_text", "")
-
-            # Try alternative text fields if processed_text is empty
-            if not processed_text:
-                processed_text = item.get("text", item.get("content", ""))
 
             # Generate relevance score
             score = self.generate_relevance_score(processed_text, keyword)

@@ -74,6 +74,23 @@ class DatabaseProcessor:
         self.engine = self.get_engine()
         self.session = self._session
 
+    def check_existing_item(self, session, keyword: str, source_url: str, href_url: str) -> bool:
+        existing_item = (
+            session.query(ScrapedItem)
+            .filter(
+                ScrapedItem.keyword == keyword,
+                ScrapedItem.source_url == source_url,
+                ScrapedItem.href_url == href_url,
+            )
+            .first()
+        )
+
+        if existing_item:
+            print(
+                f"Found existing item with ID {existing_item.id}, deleting..."
+            )
+            session.delete(existing_item)
+
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process an item from the Redis queue and store it in the database.
@@ -109,24 +126,7 @@ class DatabaseProcessor:
             session = self.session()
             try:
                 print("\nAttempting to save to database...")
-
-                # Check for existing item and delete if found
-                existing_item = (
-                    session.query(ScrapedItem)
-                    .filter(
-                        ScrapedItem.keyword == keyword,
-                        ScrapedItem.source_url == source_url,
-                        ScrapedItem.href_url == href_url,
-                    )
-                    .first()
-                )
-
-                if existing_item:
-                    print(
-                        f"Found existing item with ID {existing_item.id}, deleting..."
-                    )
-                    session.delete(existing_item)
-
+                self.check_existing_item(session, keyword, source_url, href_url)
                 session.add(db_item)
                 session.commit()
                 print(f"Database item: {db_item}")

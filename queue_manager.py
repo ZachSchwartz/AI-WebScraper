@@ -4,6 +4,7 @@ Queue manager for handling Redis queue operations.
 
 import json
 import time
+import os
 from typing import Dict, Any, Optional, Callable, List
 import redis
 
@@ -11,6 +12,26 @@ class QueueManager:
     """
     Manages connections to message queues for distributing scraped data.
     """
+
+    @classmethod
+    def get_redis_config(cls, queue_name: str = "scraped_items", wait_time: int = 5) -> Dict[str, Any]:
+        """
+        Get standard Redis configuration from environment variables.
+        
+        Args:
+            queue_name: Name of the queue to use
+            wait_time: Time to wait between queue checks in seconds
+            
+        Returns:
+            Dict containing Redis configuration
+        """
+        return {
+            "type": "redis",
+            "host": os.environ.get("REDIS_HOST", "redis"),
+            "port": int(os.environ.get("REDIS_PORT", "6379")),
+            "queue_name": queue_name,
+            "wait_time": wait_time
+        }
 
     def __init__(self, config: Dict[str, Any]):
         """
@@ -32,18 +53,38 @@ class QueueManager:
         # Initialize connection
         self._connect()
 
+    @classmethod
+    def get_redis_client(cls) -> redis.Redis:
+        """
+        Get a Redis client connection.
+            
+        Returns:
+            redis.Redis: Configured Redis client
+            
+        Raises:
+            redis.RedisError: If connection fails
+        """
+        try:
+            # Get Redis connection details from environment variables or use defaults
+            host = os.environ.get("REDIS_HOST", "redis")
+            port = int(os.environ.get("REDIS_PORT", "6379"))
+            
+            client = redis.Redis(
+                host=host,
+                port=port,
+                decode_responses=True
+            )
+            client.ping()  # Test connection
+            return client
+        except redis.RedisError as e:
+            print(f"Failed to connect to Redis: {str(e)}")
+            raise
+
     def _connect(self) -> None:
         """Establish connection to Redis."""
         try:
             print(f"Attempting to connect to Redis at {self.host}:{self.port}")
-            self.redis_client = redis.Redis(
-                host=self.host,
-                port=self.port,
-                password=self.password if self.password else None,
-                decode_responses=True,
-            )
-            # Test connection
-            self.redis_client.ping()
+            self.redis_client = self.get_redis_client()
             print(f"Successfully connected to Redis at {self.host}:{self.port}")
         except redis.RedisError as e:
             print(f"Failed to connect to Redis: {str(e)}")
@@ -148,14 +189,9 @@ class QueueManager:
                             # Process the item
                             processed_item = processor(item)
                             
-                            # Only update the item if we're not processing from the processed queue
-                            # if self.queue_name != self.processed_queue_name:
                             if self.update_item(processed_item):
                                 processed_count += 1
                                 processed_items.append(processed_item)
-                        #    else:
-                                # processed_count += 1
-                                # processed_items.append(processed_item)
                                 
                         except Exception as e:
                             print(f"Error processing item: {str(e)}")

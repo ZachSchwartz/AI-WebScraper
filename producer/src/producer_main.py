@@ -14,7 +14,6 @@ from flask import Flask, request, jsonify
 from scraper import scrape
 
 
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,106 +25,75 @@ from queue_manager import QueueManager
 app = Flask(__name__)
 
 
-def get_redis_client():
-    """Get a Redis client connection."""
-    try:
-        client = redis.Redis(
-            host=os.environ.get("REDIS_HOST", "redis"), port=6379, decode_responses=True
-        )
-        client.ping()  # Test connection
-        return client
-    except Exception as e:
-        logger.error("Failed to connect to Redis: %s", str(e))
-        raise
-
+SCRAPER_CONFIG = {
+        "targets": [
+            {
+                "url": "",
+                "keyword": "",
+                "container_selector": "body",  # Or a more specific container
+                "fields": {
+                    "links": {
+                        "selector": "a",  # Target all <a> tags
+                        "extract": [
+                            "href",
+                            "text",
+                            "title",
+                            "aria-label",
+                            "rel",
+                        ],  # Extract link attributes
+                    },
+                    "context": {
+                        "selector": "p, h1, h2, h3, li",  # Extract surrounding text
+                        "extract": "text",
+                    },
+                    "metadata": {
+                        "selector": "meta",  # Extract meta tags (e.g., description, keywords)
+                        "extract": ["name", "content"],
+                    },
+                },
+            }
+        ]
+    }
 
 def run_scraper(
     queue_manager: QueueManager, target_url: str, target_keyword: str
 ) -> Dict[str, Any]:
     """Run the scraper and publish results to the queue."""
-    try:
-        print("Starting scraping job")
-        scraper_config = {
-            "targets": [
-                {
-                    "url": target_url,
-                    "keyword": target_keyword,
-                    "container_selector": "body",  # Or a more specific container
-                    "fields": {
-                        "links": {
-                            "selector": "a",  # Target all <a> tags
-                            "extract": [
-                                "href",
-                                "text",
-                                "title",
-                                "aria-label",
-                                "rel",
-                            ],  # Extract link attributes
-                        },
-                        "context": {
-                            "selector": "p, h1, h2, h3, li",  # Extract surrounding text
-                            "extract": "text",
-                        },
-                        "metadata": {
-                            "selector": "meta",  # Extract meta tags (e.g., description, keywords)
-                            "extract": ["name", "content"],
-                        },
-                    },
-                }
-            ]
-        }
+    print("Starting scraping job")
 
-        # Call the standalone scrape function
-        result = scrape(scraper_config)
+    SCRAPER_CONFIG["targets"][0]["url"] = target_url
+    SCRAPER_CONFIG["targets"][0]["keyword"] = target_keyword
+    result = scrape(SCRAPER_CONFIG)
 
-        # Check if we got an error response
-        if isinstance(result, dict):
-            if "error" in result:
-                return {
-                    "error": "scraping_failed",
-                    "message": "Please check if url is spelled correctly, or website may not allow scraping",
-                }
-
-            results = result["results"]
-            if results:
-                print(f"Scraped {len(results)} items")
-
-                # Publish results to the queue
-                for item in results:
-                    queue_manager.publish_item(item)
-
-                print(f"Published {len(results)} items to queue")
-
-                # Get the first item from the queue using rpop (FIFO order)
-                redis_client = get_redis_client()
-                queue_name = "scraped_items"
-                item_json = redis_client.rpop(queue_name)
-
-                if item_json:
-                    first_item = json.loads(item_json)
-                    # Push the item back to the front of the queue since we want to keep it
-                    redis_client.lpush(queue_name, item_json)
-                    return first_item
-                return {
-                    "error": "scraping_failed",
-                    "message": "Please check if url is spelled correctly, or website may not allow scraping",
-                }
+    # Check if we got an error response
+    if isinstance(result, dict):
+        if "error" in result:
             return {
                 "error": "scraping_failed",
                 "message": "Please check if url is spelled correctly, or website may not allow scraping",
             }
 
-        return {
-            "error": "scraping_failed",
-            "message": "Please check if url is spelled correctly, or website may not allow scraping",
-        }
+        results = result["results"]
+        if results:
+            print(f"Scraped {len(results)} items")
 
-    except Exception as e:
-        logger.error(f"Error in scraping job: {str(e)}", exc_info=True)
-        return {
-            "error": "scraping_failed",
-            "message": "Please check if url is spelled correctly, or website may not allow scraping",
-        }
+            # Publish results to the queue
+            for item in results:
+                queue_manager.publish_item(item)
+
+            print(f"Published {len(results)} items to queue")
+
+            # Get the first item from the queue using rpop (FIFO order)
+            redis_client = QueueManager.get_redis_client()
+            queue_name = "scraped_items"
+            item_json = redis_client.rpop(queue_name)
+
+            if item_json:
+                first_item = json.loads(item_json)
+                # Push the item back to the front of the queue since we want to keep it
+                redis_client.lpush(queue_name, item_json)
+                redis_client.close()
+                return first_item
 
 
 @app.route("/health", methods=["GET"])
@@ -133,15 +101,9 @@ def health_check():
     """Health check endpoint."""
     try:
         # Check Redis connection
-        queue_config = {
-            "type": "redis",
-            "host": os.environ.get("REDIS_HOST", "redis"),
-            "port": 6379,
-            "queue_name": "scraped_items",
-        }
-        queue_manager = QueueManager(queue_config)
-        queue_manager.redis_client.ping()
-        queue_manager.close()
+        redis_client = QueueManager.get_redis_client()
+        redis_client.ping()
+        redis_client.close()
 
         return jsonify(
             {
@@ -157,34 +119,6 @@ def health_check():
         )
 
 
-@app.route("/queue/status", methods=["GET"])
-def queue_status():
-    """Check if items are ready in the Redis queue."""
-    try:
-        queue_config = {
-            "type": "redis",
-            "host": os.environ.get("REDIS_HOST", "redis"),
-            "port": 6379,
-            "queue_name": "scraped_items",
-        }
-        queue_manager = QueueManager(queue_config)
-
-        # Check queue length
-        queue_length = queue_manager.redis_client.llen("scraped_items")
-        queue_manager.close()
-
-        return jsonify(
-            {
-                "items_ready": queue_length > 0,
-                "queue_length": queue_length,
-                "timestamp": datetime.now().isoformat(),
-            }
-        )
-    except Exception as e:
-        logger.error("Error checking queue status: %s", str(e))
-        return jsonify({"error": str(e), "items_ready": False}), 500
-
-
 @app.route("/scrape", methods=["POST"])
 def scrape_endpoint():
     """API endpoint to handle scraping requests."""
@@ -195,72 +129,26 @@ def scrape_endpoint():
     url = data.get("url")
     keyword = data.get("keyword")
 
-    if not url or not keyword:
-        logger.error("Missing URL or keyword in request")
-        return (
-            jsonify(
-                {
-                    "error": "missing_parameters",
-                    "message": "URL and keyword are required",
-                }
-            ),
-            400,
-        )
+    logger.info("Initializing queue manager")
+    queue_config = QueueManager.get_redis_config()
+    logger.info("Queue config: %s", queue_config)
+    queue_manager = QueueManager(queue_config)
 
-    try:
-        logger.info("Initializing queue manager")
-        queue_config = {
-            "type": "redis",
-            "host": os.environ.get("REDIS_HOST", "redis"),
-            "port": 6379,
-            "queue_name": "scraped_items",
-        }
-        logger.info("Queue config: %s", queue_config)
-        queue_manager = QueueManager(queue_config)
+    logger.info("Starting scraper")
+    result = run_scraper(queue_manager, url, keyword)
 
-        logger.info("Starting scraper")
-        result = run_scraper(queue_manager, url, keyword)
+    # Check if we got an error response
+    if isinstance(result, dict) and "error" in result:
+        return jsonify(result), 400
 
-        # Check if we got an error response
-        if isinstance(result, dict) and "error" in result:
-            return jsonify(result), 400
-
-        # If we have a valid result, return it
-        if result:
-            return jsonify(result)
-        return (
-            jsonify(
-                {
-                    "error": "scraping_failed",
-                    "message": "Please check if url is spelled correctly, or website may not allow scraping",
-                }
-            ),
-            400,
-        )
-
-    except Exception as e:
-        logger.error("Error in scraping endpoint: %s", str(e), exc_info=True)
-        return (
-            jsonify(
-                {
-                    "error": "scraping_failed",
-                    "message": "Please check if url is spelled correctly, or website may not allow scraping",
-                }
-            ),
-            400,
-        )
+    # If we have a valid result, return it
+    if result:
+        return jsonify(result)
 
 
 def main(target_url: str, target_keyword: str) -> None:
     """Main entry point for the scraper when run directly."""
-    queue_config = {
-        "type": "redis",
-        "host": os.environ.get("REDIS_HOST", "redis"),
-        "port": 6379,
-        "queue_name": "scraped_items",
-    }
-
-    queue_manager = QueueManager(queue_config)
+    queue_manager = QueueManager(QueueManager.get_redis_config())
     print("Queue manager initialized")
 
     try:
