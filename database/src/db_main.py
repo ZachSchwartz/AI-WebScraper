@@ -16,7 +16,6 @@ from queue_manager import QueueManager
 
 app = Flask(__name__)
 
-
 @app.route("/health", methods=["GET"])
 def health_check():
     """Health check endpoint."""
@@ -25,10 +24,6 @@ def health_check():
         redis_client = QueueManager.get_redis_client()
         redis_client.ping()
         redis_client.close()
-
-        # Check database connection
-        db_processor = DatabaseProcessor()
-        db_processor.engine.connect()
 
         return jsonify(
             {
@@ -45,12 +40,15 @@ def health_check():
             500,
         )
 
+
 @app.route("/process", methods=["POST"])
 def process_endpoint():
     """API endpoint to trigger queue processing."""
     try:
         # Initialize Redis connection with processed queue
-        queue_manager = QueueManager(QueueManager.get_redis_config(queue_name="scraped_items_processed"))
+        queue_manager = QueueManager(
+            QueueManager.get_redis_config(queue_name="scraped_items_processed")
+        )
 
         # Initialize database processor
         db_processor = DatabaseProcessor()
@@ -130,7 +128,7 @@ def query_by_href():
     try:
         # Get href URL from query parameters
         href_url = request.args.get("href_url")
-        
+
         if not href_url:
             return jsonify({"error": "href_url parameter is required"}), 400
 
@@ -140,17 +138,24 @@ def query_by_href():
 
         try:
             # Query for the item with matching href_url
-            item = session.query(ScrapedItem).filter(ScrapedItem.href_url == href_url).first()
+            item = (
+                session.query(ScrapedItem)
+                .filter(ScrapedItem.href_url == href_url)
+                .first()
+            )
 
             if not item:
-                return jsonify({"error": "No item found with the specified href URL"}), 404
+                return (
+                    jsonify({"error": "No item found with the specified href URL"}),
+                    404,
+                )
 
             # Return the relevant information
             result = {
                 "href_url": item.href_url,
                 "source_url": item.source_url,
                 "keyword": item.keyword,
-                "relevance_score": item.relevance_score
+                "relevance_score": item.relevance_score,
             }
 
             return jsonify(result)

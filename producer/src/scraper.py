@@ -37,7 +37,7 @@ def fetch_with_requests(
         return {
             "error": "robots_txt_error",
             "message": f"This website's robots.txt file does not allow scraping: {str(e)}",
-            "url": url
+            "url": url,
         }
 
     for attempt in range(retry_count):
@@ -48,7 +48,7 @@ def fetch_with_requests(
                 return {
                     "error": "empty_response",
                     "message": f"Received empty response from {url}",
-                    "url": url
+                    "url": url,
                 }
             return {"content": response.text}
         except requests.exceptions.RequestException as e:
@@ -57,7 +57,7 @@ def fetch_with_requests(
                 attempt + 1,
                 retry_count,
                 url,
-                str(e)
+                str(e),
             )
             if attempt < retry_count - 1:
                 time.sleep(2**attempt)  # Exponential backoff
@@ -265,7 +265,7 @@ def create_link_data(
 def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Parse HTML content to extract links and context."""
     results = []
-    
+
     if not html or not isinstance(html, str):
         logger.error("Invalid HTML content received")
         return results
@@ -401,7 +401,7 @@ def scrape(config: Dict[str, Any]) -> Dict[str, Any]:
         # Since we're only processing one target at a time in practice,
         # we can return the error response directly
         target = targets[0]
-        logger.info("Processing target: %s", target.get('url'))
+        logger.info("Processing target: %s", target.get("url"))
         target_result = scrape_target(target, headers, timeout, retry_count)
 
         # If there's an error, propagate it up

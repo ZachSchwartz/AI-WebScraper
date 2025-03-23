@@ -53,15 +53,5 @@ def process_endpoint():
         return jsonify({"error": str(e), "status": "error"}), 500
 
 
-def main() -> None:
-    """Initialize and run the LLM processor."""
-    # Check if we're running in API mode (no arguments)
-    if len(sys.argv) == 1:
-        # Run as API server
-        app.run(host="0.0.0.0", port=5000)
-    else:
-        process_endpoint()
-
-
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=5000)

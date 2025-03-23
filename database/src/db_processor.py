@@ -75,6 +75,7 @@ class DatabaseProcessor:
         self.session = self._session
 
     def check_existing_item(self, session, keyword: str, source_url: str, href_url: str) -> bool:
+        """Checks if processed item already exists in database and deletes it if it does."""
         existing_item = (
             session.query(ScrapedItem)
             .filter(

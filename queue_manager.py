@@ -8,20 +8,23 @@ import os
 from typing import Dict, Any, Optional, Callable, List
 import redis
 
+
 class QueueManager:
     """
     Manages connections to message queues for distributing scraped data.
     """
 
     @classmethod
-    def get_redis_config(cls, queue_name: str = "scraped_items", wait_time: int = 5) -> Dict[str, Any]:
+    def get_redis_config(
+        cls, queue_name: str = "scraped_items", wait_time: int = 5
+    ) -> Dict[str, Any]:
         """
         Get standard Redis configuration from environment variables.
-        
+
         Args:
             queue_name: Name of the queue to use
             wait_time: Time to wait between queue checks in seconds
-            
+
         Returns:
             Dict containing Redis configuration
         """
@@ -30,7 +33,7 @@ class QueueManager:
             "host": os.environ.get("REDIS_HOST", "redis"),
             "port": int(os.environ.get("REDIS_PORT", "6379")),
             "queue_name": queue_name,
-            "wait_time": wait_time
+            "wait_time": wait_time,
         }
 
     def __init__(self, config: Dict[str, Any]):
@@ -40,15 +43,13 @@ class QueueManager:
         Args:
             config: Dictionary containing queue configuration
         """
-        self.queue_type = config.get("type", "redis").lower()
         self.queue_name = config.get("queue_name", "scraped_items")
         self.processed_queue_name = f"{self.queue_name}_processed"
         self.host = config.get("host", "localhost")
         self.port = config.get("port", 6379)
         self.password = config.get("password", "")
         self.batch_size = config.get("batch_size", 10)
-        self.wait_time = config.get("wait_time", 5)
-        self.redis_client = None
+        self.redis_client = self.get_redis_client()
 
         # Initialize connection
         self._connect()
@@ -57,10 +58,10 @@ class QueueManager:
     def get_redis_client(cls) -> redis.Redis:
         """
         Get a Redis client connection.
-            
+
         Returns:
             redis.Redis: Configured Redis client
-            
+
         Raises:
             redis.RedisError: If connection fails
         """
@@ -68,12 +69,8 @@ class QueueManager:
             # Get Redis connection details from environment variables or use defaults
             host = os.environ.get("REDIS_HOST", "redis")
             port = int(os.environ.get("REDIS_PORT", "6379"))
-            
-            client = redis.Redis(
-                host=host,
-                port=port,
-                decode_responses=True
-            )
+
+            client = redis.Redis(host=host, port=port, decode_responses=True)
             client.ping()  # Test connection
             return client
         except redis.RedisError as e:
@@ -162,7 +159,9 @@ class QueueManager:
             print(f"Error adding item to processed queue: {str(e)}")
             return False
 
-    def process_queue(self, processor: Callable[[Dict[str, Any]], Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def process_queue(
+        self, processor: Callable[[Dict[str, Any]], Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """
         Process items from the queue continuously.
 
@@ -176,9 +175,11 @@ class QueueManager:
         print("Starting queue processing")
         processed_count = 0
         iteration_count = 0
-        max_iterations = getattr(self, 'max_iterations', 1000)  # Default to 1000 if not set
+        max_iterations = getattr(
+            self, "max_iterations", 1000
+        )  # Default to 1000 if not set
         processed_items = []
-        
+
         try:
             while iteration_count < max_iterations:
                 items = self.get_batch()
@@ -188,11 +189,11 @@ class QueueManager:
                         try:
                             # Process the item
                             processed_item = processor(item)
-                            
+
                             if self.update_item(processed_item):
                                 processed_count += 1
                                 processed_items.append(processed_item)
-                                
+
                         except Exception as e:
                             print(f"Error processing item: {str(e)}")
                             # Don't count failed items as processed
@@ -201,20 +202,19 @@ class QueueManager:
                     if processed_count > 0:
                         print(f"Queue empty after processing {processed_count} items")
                         break
-                    else:
-                        print(f"Queue empty, waiting {self.wait_time} seconds")
-                        time.sleep(self.wait_time)
-                
+                    print("Queue empty, waiting 5 seconds")
+                    time.sleep(5)
+
                 iteration_count += 1
-                
+
             if iteration_count >= max_iterations:
                 print(f"Reached maximum iteration limit of {max_iterations}")
-                
+
         except KeyboardInterrupt:
             print("Stopping queue processing")
         finally:
             self.close()
-            
+
         return processed_items
 
     def close(self) -> None:
@@ -254,25 +254,25 @@ class QueueManager:
     def read_queue(self, queue_name: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Read and display items from a Redis queue.
-        
+
         Args:
             queue_name: Name of the queue to read from. If None, uses self.queue_name
-        
+
         Returns:
             List of items read from the queue
         """
         try:
             queue_name = queue_name or self.queue_name
-            
+
             # Get queue length
             queue_length = self.redis_client.llen(queue_name)
             print(f"\nFound {queue_length} items in queue '{queue_name}'")
             print("=" * 80)
-            
+
             display_count = queue_length
             items = []
             scores = []  # Track scores for summary
-            
+
             # Read and display items
             for i in range(display_count):
                 item_json = self.redis_client.lindex(queue_name, i)
@@ -280,11 +280,14 @@ class QueueManager:
                     try:
                         item = json.loads(item_json)
                         items.append(item)
-                        
+
                         # Extract score if available
-                        if "relevance_analysis" in item and "score" in item["relevance_analysis"]:
+                        if (
+                            "relevance_analysis" in item
+                            and "score" in item["relevance_analysis"]
+                        ):
                             scores.append(item["relevance_analysis"]["score"])
-                        
+
                         print(f"\nItem {i + 1}/{display_count}:")
                         print("=" * 80)
                         self._format_dict(item)
@@ -292,7 +295,7 @@ class QueueManager:
                     except json.JSONDecodeError as e:
                         print(f"Error decoding item {i}: {e}")
                         print(f"Raw content: {item_json}")
-            
+
             # Display score summary if we have scores
             if scores:
                 print("\nScore Summary:")
@@ -302,9 +305,9 @@ class QueueManager:
                 avg_score = sum(scores) / len(scores)
                 print(f"Average Score: {avg_score:.3f}")
                 print("=" * 40)
-            
+
             return items
-                
+
         except Exception as e:
             print(f"Error reading queue: {e}")
             return []
@@ -312,7 +315,7 @@ class QueueManager:
     def clear_queues(self) -> bool:
         """
         Clear both the main queue and processed queue.
-        
+
         Returns:
             bool: True if successful, False otherwise
         """
@@ -323,4 +326,4 @@ class QueueManager:
             return True
         except Exception as e:
             print(f"Error clearing queues: {str(e)}")
-            return False 
+            return False
