@@ -9,9 +9,9 @@ from llm_processor import LLMProcessor
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
-from queue_util import QueueManager
-from error_util import format_error
-from health_util import perform_health_check
+from util.queue_util import QueueManager
+from util.error_util import format_error
+from util.health_util import perform_health_check
 
 app = Flask(__name__)
 

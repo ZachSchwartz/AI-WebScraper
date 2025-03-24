@@ -4,7 +4,7 @@ Health utility functions for the web scraper.
 
 from datetime import datetime
 from flask import jsonify
-from queue_util import QueueManager
+from util.queue_util import QueueManager
 
 
 def perform_health_check(service_name):

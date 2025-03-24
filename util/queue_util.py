@@ -7,7 +7,7 @@ import time
 import os
 from typing import Dict, Any, Optional, Callable, List
 import redis
-from error_util import format_error
+from util.error_util import format_error
 
 
 class QueueManager:

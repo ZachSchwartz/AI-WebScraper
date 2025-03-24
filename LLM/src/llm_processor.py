@@ -14,7 +14,7 @@ from sentence_transformers import SentenceTransformer, util
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
-from error_util import format_error
+from util.error_util import format_error
 
 class LLMProcessor:
     """Processes text content using sentence transformers with proper caching."""
