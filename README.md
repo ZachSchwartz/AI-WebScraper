@@ -25,19 +25,37 @@ Clone the Repository off Github
 
 Run to initialize the application and set up the necessary components. Running this with or without the --build flag will open a local host webpage. First time setup will be slow since it will have to install dependencies.
 
+Windows:
+
 ```.\build.bat --build```
+
+Mac (first make the script executable with `chmod +x build.sh`):
+
+```./build.sh --build```
 
 
 Subsequent Runs:
 Run to start the application.
 
+Windows:
+
 ```.\build.bat```
+
+Mac:
+
+```./build.sh```
 
 
 Database Deletion:
 To delete the database
 
+Windows:
+
 ```.\build.bat --delete_db```
+
+Mac:
+
+```./build.sh --delete_db```
 
 
 ## API Overview
