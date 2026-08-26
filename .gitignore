@@ -1,7 +1,30 @@
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+
+# Virtual environments
 .venv/
 venv/
+env/
+
+# Test and lint caches
 .pytest_cache/
+.mypy_cache/
 .coverage
 htmlcov/
+
+# Local environment configuration
+.env
+
+# Node tooling installed into this directory; not a dependency of this project
+node_modules/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Claude Code local overrides
+.claude/settings.local.json

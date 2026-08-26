@@ -60,6 +60,10 @@ Mac:
 ```./build.sh --delete_db```
 
 
+### Configuration:
+The stack runs out of the box on local development defaults. To change the database or pgAdmin credentials, copy `.env.example` to `.env` and edit it; Docker Compose picks it up automatically. `.env` is gitignored, so your values stay local.
+
+
 ## Running the Tests
 The test suite runs outside Docker and needs no model download. Every check below also runs in CI on each push.
 
@@ -134,7 +138,11 @@ For the link prioritization task, a sentence transformer was employed to avoid t
 If you wish to access the database to perform your own queries, or check out the raw data stored alongside a link, here are the instructions
 1. Perform the setup instructions
 2. Go to localhost:5050
-3. Enter for the email admin@example.com, and admin for the password
+3. Sign in with the pgAdmin credentials from your `.env` (defaults: admin@example.com / admin)
 4. Open scraper > databases > scraper > schemas > public > tables > scraped_items
 5. Right click on scraped_items, and select "Query Tool"
 6. You can now run any psql command you'd like on the database
+
+
+## License
+Released under the [MIT License](LICENSE).
