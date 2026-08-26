@@ -1,0 +1,13 @@
+[MAIN]
+fail-under=9.5
+
+[FORMAT]
+# black formats at 88; leave headroom for the long strings it will not split.
+max-line-length=120
+
+[MESSAGES CONTROL]
+# broad-exception-caught: services degrade to a formatted error rather than crash.
+# wrong-import-position: shared util imports follow the sys.path shim each service needs.
+disable=
+    broad-exception-caught,
+    wrong-import-position,

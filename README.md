@@ -1,5 +1,7 @@
 # AI-WebScraper
 
+[![CI](https://github.com/ZachSchwartz/AI-WebScraper/actions/workflows/ci.yml/badge.svg)](https://github.com/ZachSchwartz/AI-WebScraper/actions/workflows/ci.yml)
+
 ## Introduction
 
 This project is designed to allow for web scraping, finding links, and relevance scoring using a combination of Redis, PostgreSQL, and a sentence transformer model. It provides an API that allows users to scrape web pages, analyze extracted links, and query stored data based on relevance to a given keyword. It does all this through an easy to use and understand locally hosted page, that gets run with the program.
@@ -56,6 +58,19 @@ Windows:
 Mac:
 
 ```./build.sh --delete_db```
+
+
+## Running the Tests
+The test suite runs outside Docker and needs no model download. Every check below also runs in CI on each push.
+
+```
+pip install -r requirements-dev.txt
+pytest
+black --check database LLM producer util web_service tests
+pylint --disable=import-error database LLM producer util web_service tests
+```
+
+The LLM service imports `torch` and `sentence-transformers` at module level, which together weigh over a gigabyte. Rather than install them to test scoring, `tests/conftest.py` substitutes a deterministic stand-in that embeds text as a hashed bag of words, so cosine similarity still rises with shared vocabulary and the scoring logic is exercised in full.
 
 
 ## API Overview

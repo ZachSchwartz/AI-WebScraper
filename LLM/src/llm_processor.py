@@ -16,6 +16,7 @@ root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 sys.path.append(root_dir)
 from util.error_util import format_error
 
+
 class LLMProcessor:
     """Processes text content using sentence transformers with proper caching."""
 
@@ -27,7 +28,9 @@ class LLMProcessor:
         # all-MiniLM-L6-v2 is very fast and has good performance for semantic similarity
         self.model_name = "all-MiniLM-L6-v2"
         # Use a persistent volume mount path for model caching
-        self.cache_dir = os.path.abspath("/app/model_cache")
+        self.cache_dir = os.path.abspath(
+            os.environ.get("MODEL_CACHE_DIR", "/app/model_cache")
+        )
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
 

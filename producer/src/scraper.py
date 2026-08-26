@@ -1,6 +1,7 @@
 """
 Web scraper module for collecting data from target websites.
 """
+
 import sys
 import os
 import time
@@ -38,15 +39,21 @@ def fetch_with_requests(
     try:
         is_allowed_by_robots(url, headers["User-Agent"])
     except Exception as e:
-        logger.error(f"Robots.txt error for %s: %d", url, str(e))
-        return format_error("robots_txt_error", f"This website's robots.txt file does not allow scraping: {str(e)}", url)
+        logger.error("Robots.txt error for %s: %s", url, str(e))
+        return format_error(
+            "robots_txt_error",
+            f"This website's robots.txt file does not allow scraping: {str(e)}",
+            url,
+        )
 
     for attempt in range(retry_count):
         try:
             response = requests.get(url, headers=headers, timeout=timeout)
             response.raise_for_status()
             if not response.text:
-                return format_error("empty_response", f"Received empty response from {url}", url)
+                return format_error(
+                    "empty_response", f"Received empty response from {url}", url
+                )
             return {"content": response.text}
         except requests.exceptions.RequestException as e:
             logger.warning(

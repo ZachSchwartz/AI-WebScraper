@@ -35,18 +35,14 @@ def process_endpoint():
         # Initialize database processor
         db_processor = DatabaseProcessor()
         # Process items from the queue
-        items = queue_util.process_queue(
-            lambda item: db_processor.process_item(item)
-        )
+        items = queue_util.process_queue(lambda item: db_processor.process_item(item))
 
         queue_util.clear_queues()
 
         return jsonify({"message": items})
     except Exception as e:
         return (
-            jsonify(
-                format_error(str(e), "Error storing data in database")
-            ),
+            jsonify(format_error(str(e), "Error storing data in database")),
             500,
         )
 

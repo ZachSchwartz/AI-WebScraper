@@ -10,7 +10,6 @@ from typing import Dict, Any
 from flask import Flask, request, jsonify
 from scraper import scrape
 
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -73,7 +72,10 @@ def run_scraper(
     # Check if we got an error response
     if isinstance(result, dict):
         if "error" in result:
-            return format_error("scraping_failed", "Please check if url is spelled correctly, or website may not allow scraping")
+            return format_error(
+                "scraping_failed",
+                "Please check if url is spelled correctly, or website may not allow scraping",
+            )
 
         results = result["results"]
         if results:

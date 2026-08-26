@@ -6,7 +6,6 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import QueuePool
 
-
 # Create SQLAlchemy base
 Base = declarative_base()
 
@@ -74,7 +73,9 @@ class DatabaseProcessor:
         self.engine = self.get_engine()
         self.session = self._session
 
-    def check_existing_item(self, session, keyword: str, source_url: str, href_url: str) -> bool:
+    def check_existing_item(
+        self, session, keyword: str, source_url: str, href_url: str
+    ) -> bool:
         """Checks if processed item already exists in database and deletes it if it does."""
         existing_item = (
             session.query(ScrapedItem)
@@ -87,9 +88,7 @@ class DatabaseProcessor:
         )
 
         if existing_item:
-            print(
-                f"Found existing item with ID {existing_item.id}, deleting..."
-            )
+            print(f"Found existing item with ID {existing_item.id}, deleting...")
             session.delete(existing_item)
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
