@@ -1,7 +1,7 @@
 """
 Shared test fixtures.
 
-The LLM service imports torch and sentence-transformers at module level, which
+The scorer service imports torch and sentence-transformers at module level, which
 together weigh over a gigabyte and download a model on first use. The tests
 substitute a deterministic stand-in instead: embeddings are hashed bag-of-words
 vectors, so cosine similarity still rises with shared vocabulary and the scoring
@@ -53,7 +53,7 @@ class FakeSentenceTransformer:
 
 
 def _install_stubs() -> None:
-    """Register stub modules before llm_processor is imported."""
+    """Register stub modules before scorer_processor is imported."""
     torch = types.ModuleType("torch")
     torch.cuda = types.SimpleNamespace(is_available=lambda: False)
     sys.modules.setdefault("torch", torch)
@@ -68,9 +68,9 @@ _install_stubs()
 
 
 @pytest.fixture
-def llm_processor(tmp_path, monkeypatch):
-    """An LLMProcessor backed by the stub model and a throwaway cache directory."""
+def scorer_processor(tmp_path, monkeypatch):
+    """A ScorerProcessor backed by the stub model and a throwaway cache directory."""
     monkeypatch.setenv("MODEL_CACHE_DIR", str(tmp_path))
-    from llm_processor import LLMProcessor
+    from scorer_processor import ScorerProcessor
 
-    return LLMProcessor()
+    return ScorerProcessor()

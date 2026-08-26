@@ -1,6 +1,6 @@
 """
 Web service module that provides a Flask-based API for web scraping and data processing.
-This service coordinates between producer, LLM, and database services to scrape, analyze,
+This service coordinates between producer, scorer, and database services to scrape, analyze,
 and store web content based on user queries.
 """
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 PRODUCER_SERVICE_URL = os.getenv("PRODUCER_SERVICE_URL", "http://producer:5000")
-LLM_SERVICE_URL = os.getenv("LLM_SERVICE_URL", "http://llm:5000")
+SCORER_SERVICE_URL = os.getenv("SCORER_SERVICE_URL", "http://scorer:5000")
 DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db_processor:5000")
 
 
@@ -117,7 +117,7 @@ def scrape():
 
     The function orchestrates the following steps:
     1. Sends URL and keyword to producer service for scraping
-    2. Triggers LLM service for content analysis
+    2. Triggers scorer service for content analysis
     3. Retrieves processed results from database service
     4. Sorts and returns relevant links based on relevance scores
 
@@ -134,7 +134,7 @@ def scrape():
         make_service_request(
             PRODUCER_SERVICE_URL, "scrape", json={"url": url, "keyword": keyword}
         )
-        make_service_request(LLM_SERVICE_URL, "process")
+        make_service_request(SCORER_SERVICE_URL, "process")
         db_data = make_service_request(DB_SERVICE_URL, "process")
 
         # Use a dictionary to track unique URLs and keep the highest score for duplicates

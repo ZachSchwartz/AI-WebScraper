@@ -21,10 +21,10 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Check formatting
-        run: black --check database LLM producer util web_service tests
+        run: black --check database scorer producer util web_service tests
 
       - name: Lint
-        run: pylint --disable=import-error database LLM producer util web_service tests
+        run: pylint --disable=import-error database scorer producer util web_service tests
 
       - name: Test
         run: pytest

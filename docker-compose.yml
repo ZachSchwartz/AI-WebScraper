@@ -57,7 +57,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
-      - LLM_SERVICE_URL=http://llm:5000
+      - SCORER_SERVICE_URL=http://scorer:5000
     volumes:
       - ./producer/src:/app/src
       - ./util:/app/util
@@ -69,10 +69,10 @@ services:
       retries: 5
       start_period: 30s
 
-  llm:
+  scorer:
     build:
       context: .
-      dockerfile: LLM/Dockerfile
+      dockerfile: scorer/Dockerfile
     restart: "no"
     ports:
       - "5001:5000"
@@ -86,7 +86,7 @@ services:
       - TRANSFORMERS_CACHE=/app/model_cache
       - HF_HOME=/app/model_cache
     volumes:
-      - ./LLM/src:/app/src
+      - ./scorer/src:/app/src
       - model_cache:/app/model_cache
       - ./util:/app/util
     user: root  # Temporarily use root to ensure cache directory permissions
@@ -100,7 +100,7 @@ services:
       bash -c "
         mkdir -p /app/model_cache &&
         chmod -R 777 /app/model_cache &&
-        python src/llm_main.py
+        python src/scorer_main.py
       "
 
   db_processor:
@@ -142,14 +142,14 @@ services:
     depends_on:
       producer:
         condition: service_healthy
-      llm:
+      scorer:
         condition: service_healthy
       db_processor:
         condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
       - PRODUCER_SERVICE_URL=http://producer:5000
-      - LLM_SERVICE_URL=http://llm:5000
+      - SCORER_SERVICE_URL=http://scorer:5000
       - DB_SERVICE_URL=http://db_processor:5000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/"]

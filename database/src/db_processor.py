@@ -97,7 +97,7 @@ class DatabaseProcessor:
         If an item with the same keyword, source_url, and href_url exists, it will be replaced.
 
         Args:
-            item: Dictionary containing processed data from LLM
+            item: Dictionary containing processed data from the scorer
 
         Returns:
             The original item, for compatibility with queue_util

@@ -17,7 +17,7 @@ sys.path.append(root_dir)
 from util.error_util import format_error
 
 
-class LLMProcessor:
+class ScorerProcessor:
     """Processes text content using sentence transformers with proper caching."""
 
     def __init__(self):

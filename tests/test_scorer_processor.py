@@ -5,11 +5,11 @@
 import pytest
 
 
-def test_keyword_match_outscores_unrelated_text(llm_processor):
-    matched = llm_processor.generate_relevance_score(
+def test_keyword_match_outscores_unrelated_text(scorer_processor):
+    matched = scorer_processor.generate_relevance_score(
         "climbing harness buying guide", "harness"
     )
-    unrelated = llm_processor.generate_relevance_score(
+    unrelated = scorer_processor.generate_relevance_score(
         "sourdough bread starter recipes", "harness"
     )
 
@@ -20,27 +20,27 @@ def test_keyword_match_outscores_unrelated_text(llm_processor):
     "text",
     ["harness harness harness", "sourdough bread starter recipes", ""],
 )
-def test_scores_stay_within_the_unit_range(llm_processor, text):
-    assert 0.0 <= llm_processor.generate_relevance_score(text, "harness") <= 1.0
+def test_scores_stay_within_the_unit_range(scorer_processor, text):
+    assert 0.0 <= scorer_processor.generate_relevance_score(text, "harness") <= 1.0
 
 
-def test_repeated_text_is_embedded_only_once(llm_processor):
-    llm_processor.generate_relevance_score("climbing harness guide", "harness")
-    after_first_pass = list(llm_processor.model.encoded)
+def test_repeated_text_is_embedded_only_once(scorer_processor):
+    scorer_processor.generate_relevance_score("climbing harness guide", "harness")
+    after_first_pass = list(scorer_processor.model.encoded)
 
-    llm_processor.generate_relevance_score("climbing harness guide", "harness")
+    scorer_processor.generate_relevance_score("climbing harness guide", "harness")
 
-    assert llm_processor.model.encoded == after_first_pass
+    assert scorer_processor.model.encoded == after_first_pass
 
 
-def test_embeddings_are_written_to_the_cache_directory(llm_processor, tmp_path):
-    llm_processor.generate_relevance_score("climbing harness guide", "harness")
+def test_embeddings_are_written_to_the_cache_directory(scorer_processor, tmp_path):
+    scorer_processor.generate_relevance_score("climbing harness guide", "harness")
 
     assert list((tmp_path / "embeddings_cache").glob("*.npy"))
 
 
-def test_process_item_resolves_relative_hrefs(llm_processor):
-    result = llm_processor.process_item(
+def test_process_item_resolves_relative_hrefs(scorer_processor):
+    result = scorer_processor.process_item(
         {
             "keyword": "Harness",
             "processed_text": "climbing harness buying guide",
@@ -55,8 +55,8 @@ def test_process_item_resolves_relative_hrefs(llm_processor):
     assert 0.0 <= analysis["score"] <= 1.0
 
 
-def test_process_item_leaves_absolute_hrefs_alone(llm_processor):
-    result = llm_processor.process_item(
+def test_process_item_leaves_absolute_hrefs_alone(scorer_processor):
+    result = scorer_processor.process_item(
         {
             "keyword": "ropes",
             "processed_text": "climbing ropes",
@@ -68,7 +68,7 @@ def test_process_item_leaves_absolute_hrefs_alone(llm_processor):
     assert result["relevance_analysis"]["href_url"] == "https://shop.example.com/ropes"
 
 
-def test_process_item_leaves_the_queued_item_untouched(llm_processor):
+def test_process_item_leaves_the_queued_item_untouched(scorer_processor):
     item = {
         "keyword": "harness",
         "processed_text": "climbing harness guide",
@@ -76,7 +76,7 @@ def test_process_item_leaves_the_queued_item_untouched(llm_processor):
         "href": "/guide",
     }
 
-    result = llm_processor.process_item(item)
+    result = scorer_processor.process_item(item)
 
     assert "relevance_analysis" not in item
     assert result["href"] == "/guide"

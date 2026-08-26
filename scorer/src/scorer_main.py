@@ -1,11 +1,11 @@
 """
-Main entry point for the LLM processor.
+Main entry point for the scorer processor.
 """
 
 import os
 import sys
 from flask import Flask, jsonify
-from llm_processor import LLMProcessor
+from scorer_processor import ScorerProcessor
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
@@ -18,25 +18,25 @@ app = Flask(__name__)
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    return perform_health_check("llm_processor")
+    return perform_health_check("scorer_processor")
 
 
 @app.route("/process", methods=["POST"])
 def process_endpoint():
     """API endpoint to trigger queue processing."""
     try:
-        # Initialize Redis connection with longer wait time for LLM processing
+        # Initialize Redis connection with longer wait time for scorer processing
         queue_util = QueueManager(QueueManager.get_redis_config(wait_time=10))
 
         # Process items
-        processor = LLMProcessor()
+        processor = ScorerProcessor()
         processed_items = queue_util.process_queue(
             lambda item: processor.process_item(item)
         )
 
         return jsonify({"message": processed_items})
     except Exception as e:
-        return format_error("llm_processor_error", str(e))
+        return format_error("scorer_processor_error", str(e))
 
 
 if __name__ == "__main__":

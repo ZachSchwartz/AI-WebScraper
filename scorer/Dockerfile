@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first to leverage Docker cache
-COPY LLM/requirements.txt /app/
+COPY scorer/requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy queue_util.py from root directory
