@@ -5,6 +5,7 @@ and store web content based on user queries.
 """
 
 import os
+import uuid
 import logging
 import requests
 from flask import Flask, render_template, request, jsonify, abort
@@ -18,6 +19,8 @@ app = Flask(__name__)
 PRODUCER_SERVICE_URL = os.getenv("PRODUCER_SERVICE_URL", "http://producer:5000")
 SCORER_SERVICE_URL = os.getenv("SCORER_SERVICE_URL", "http://scorer:5000")
 DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db_processor:5000")
+
+SERVICE_TIMEOUT = int(os.getenv("SERVICE_TIMEOUT", "15"))
 
 
 def sort_links(data: dict):
@@ -80,7 +83,7 @@ def make_service_request(
     """
     url = f"{service_url}/{endpoint.lstrip('/')}"
     response = requests.request(
-        method=method, url=url, json=json, params=params, timeout=10
+        method=method, url=url, json=json, params=params, timeout=SERVICE_TIMEOUT
     )
 
     # Get the response data even if status code is not 200
@@ -121,6 +124,9 @@ def scrape():
     3. Retrieves processed results from database service
     4. Sorts and returns relevant links based on relevance scores
 
+    Each request carries a job id so that results are scoped to this scrape.
+    Without it, items a previous run left in the queue would be reported here.
+
     Returns:
         tuple: JSON response containing scraped results and HTTP status code
     """
@@ -129,13 +135,18 @@ def scrape():
         data = request.json
         url = data.get("url")
         keyword = data.get("keyword")
+        job_id = str(uuid.uuid4())
 
         # Call all services in sequence
         make_service_request(
-            PRODUCER_SERVICE_URL, "scrape", json={"url": url, "keyword": keyword}
+            PRODUCER_SERVICE_URL,
+            "scrape",
+            json={"url": url, "keyword": keyword, "job_id": job_id},
         )
         make_service_request(SCORER_SERVICE_URL, "process")
-        db_data = make_service_request(DB_SERVICE_URL, "process")
+        db_data = make_service_request(
+            DB_SERVICE_URL, "process", json={"job_id": job_id}
+        )
 
         # Use a dictionary to track unique URLs and keep the highest score for duplicates
         links = sort_links(db_data)
@@ -144,6 +155,7 @@ def scrape():
             {
                 "source_url": url,
                 "keyword": keyword,
+                "job_id": job_id,
                 "results": links,
                 "count": len(links),
             }

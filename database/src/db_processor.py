@@ -2,8 +2,7 @@ import os
 import traceback
 from typing import Dict, Any
 import sqlalchemy as sa
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
 
 # Create SQLAlchemy base
@@ -21,6 +20,7 @@ class ScrapedItem(Base):
     source_url = sa.Column(sa.String, nullable=False)
     href_url = sa.Column(sa.String, nullable=True)
     relevance_score = sa.Column(sa.Float, nullable=True)
+    job_id = sa.Column(sa.String, nullable=True)
     raw_data = sa.Column(sa.JSON, nullable=True)
 
     def __repr__(self):
@@ -119,6 +119,7 @@ class DatabaseProcessor:
                 source_url=source_url,
                 href_url=href_url,
                 relevance_score=score,
+                job_id=item.get("job_id"),
                 raw_data=item,
             )
 

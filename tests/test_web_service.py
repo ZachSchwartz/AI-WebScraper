@@ -79,6 +79,38 @@ def test_scrape_endpoint_calls_each_service_and_ranks_results(client, monkeypatc
     ]
 
 
+def test_scrape_endpoint_tags_the_producer_and_db_calls_with_one_job_id(
+    client, monkeypatch
+):
+    payloads = []
+
+    def fake_request(service_url, endpoint, **kwargs):
+        payloads.append(kwargs.get("json"))
+        return {"message": []}
+
+    monkeypatch.setattr(web_app, "make_service_request", fake_request)
+
+    response = client.post(
+        "/api/scrape", json={"url": "https://example.com", "keyword": "harness"}
+    )
+
+    job_id = response.json["job_id"]
+    assert payloads[0]["job_id"] == job_id
+    assert payloads[2]["job_id"] == job_id
+
+
+def test_scrape_endpoint_issues_a_fresh_job_id_per_request(client, monkeypatch):
+    monkeypatch.setattr(
+        web_app, "make_service_request", lambda *args, **kwargs: {"message": []}
+    )
+    request_body = {"url": "https://example.com", "keyword": "harness"}
+
+    first = client.post("/api/scrape", json=request_body)
+    second = client.post("/api/scrape", json=request_body)
+
+    assert first.json["job_id"] != second.json["job_id"]
+
+
 def test_scrape_endpoint_reports_a_failed_service(client, unavailable_service):
     response = client.post(
         "/api/scrape", json={"url": "https://example.com", "keyword": "harness"}

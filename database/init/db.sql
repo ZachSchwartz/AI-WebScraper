@@ -7,6 +7,7 @@ CREATE TABLE scraped_items (
     source_url VARCHAR,
     relevance_score FLOAT,
     href_url VARCHAR,
+    job_id VARCHAR,
     raw_data JSONB,
     processed_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -16,6 +17,7 @@ CREATE INDEX IF NOT EXISTS idx_scraped_items_source_url ON scraped_items(source_
 CREATE INDEX IF NOT EXISTS idx_scraped_items_url ON scraped_items(href_url);
 CREATE INDEX IF NOT EXISTS idx_scraped_items_keyword ON scraped_items(keyword);
 CREATE INDEX IF NOT EXISTS idx_scraped_items_relevance ON scraped_items(relevance_score);
+CREATE INDEX IF NOT EXISTS idx_scraped_items_job_id ON scraped_items(job_id);
 
 -- Grant appropriate permissions
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;

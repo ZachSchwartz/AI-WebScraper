@@ -27,6 +27,8 @@ def health_check():
 def process_endpoint():
     """API endpoint to trigger queue processing."""
     try:
+        job_id = (request.json or {}).get("job_id")
+
         # Initialize Redis connection with processed queue
         queue_util = QueueManager(
             QueueManager.get_redis_config(queue_name="scraped_items_processed")
@@ -35,9 +37,10 @@ def process_endpoint():
         # Initialize database processor
         db_processor = DatabaseProcessor()
         # Process items from the queue
-        items = queue_util.process_queue(lambda item: db_processor.process_item(item))
+        items = queue_util.process_queue(db_processor.process_item)
 
-        queue_util.clear_queues()
+        if job_id:
+            items = [item for item in items if item.get("job_id") == job_id]
 
         return jsonify({"message": items})
     except Exception as e:
@@ -81,6 +84,7 @@ def query_items():
                     "source_url": item.source_url,
                     "href_url": item.href_url,
                     "relevance_score": item.relevance_score,
+                    "job_id": item.job_id,
                     "raw_data": item.raw_data,
                 }
                 for item in results

@@ -167,8 +167,8 @@ class QueueManager:
         Process items from the queue continuously.
 
         Args:
-            processor: Callback function to process each item. Can be either a standalone function
-                      or an instance method (in which case it should be passed as a lambda)
+            processor: Callback function to process each item. Accepts either a standalone
+                      function or a bound method.
 
         Returns:
             List of successfully processed items
@@ -223,19 +223,3 @@ class QueueManager:
         if self.redis_client:
             self.redis_client.close()
             print("Redis connection closed")
-
-    def clear_queues(self) -> bool:
-        """
-        Clear both the main queue and processed queue.
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        try:
-            self.redis_client.delete(self.queue_name)
-            self.redis_client.delete(self.processed_queue_name)
-            print("Successfully cleared both main and processed queues")
-            return True
-        except Exception as e:
-            print(format_error(str(e)))
-            return False

@@ -15,6 +15,8 @@ from util.health_util import perform_health_check
 
 app = Flask(__name__)
 
+processor = ScorerProcessor()
+
 
 @app.route("/health", methods=["GET"])
 def health_check():
@@ -28,11 +30,7 @@ def process_endpoint():
         # Initialize Redis connection with longer wait time for scorer processing
         queue_util = QueueManager(QueueManager.get_redis_config(wait_time=10))
 
-        # Process items
-        processor = ScorerProcessor()
-        processed_items = queue_util.process_queue(
-            lambda item: processor.process_item(item)
-        )
+        processed_items = queue_util.process_queue(processor.process_item)
 
         return jsonify({"message": processed_items})
     except Exception as e:

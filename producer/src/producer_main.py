@@ -60,7 +60,7 @@ SCRAPER_CONFIG = {
 
 
 def run_scraper(
-    queue_util: QueueManager, target_url: str, target_keyword: str
+    queue_util: QueueManager, target_url: str, target_keyword: str, job_id: str = None
 ) -> Dict[str, Any]:
     """Run the scraper and publish results to the queue."""
     print("Starting scraping job")
@@ -81,8 +81,8 @@ def run_scraper(
         if results:
             print(f"Scraped {len(results)} items")
 
-            # Publish results to the queue
             for item in results:
+                item["job_id"] = job_id
                 queue_util.publish_item(item)
 
             print(f"Published {len(results)} items to queue")
@@ -107,6 +107,7 @@ def scrape_endpoint():
 
     url = data.get("url")
     keyword = data.get("keyword")
+    job_id = data.get("job_id")
 
     logger.info("Initializing queue manager")
     queue_config = QueueManager.get_redis_config()
@@ -114,7 +115,7 @@ def scrape_endpoint():
     queue_util = QueueManager(queue_config)
 
     logger.info("Starting scraper")
-    result = run_scraper(queue_util, url, keyword)
+    result = run_scraper(queue_util, url, keyword, job_id)
 
     # Check if we got an error response
     if isinstance(result, dict) and "error" in result:
