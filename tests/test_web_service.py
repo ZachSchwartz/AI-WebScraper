@@ -5,7 +5,7 @@
 import app as web_app
 import pytest
 import requests
-from werkzeug.exceptions import NotFound
+from werkzeug.exceptions import BadRequest, NotFound
 from app import app, sort_links
 
 
@@ -247,3 +247,36 @@ def test_health_reports_the_service_is_up(client):
     assert response.status_code == 200
     assert response.json["status"] == "healthy"
     assert response.json["service"] == "web_service"
+
+
+def test_an_internal_failure_is_reported_without_describing_the_stack(
+    client, monkeypatch
+):
+    """The text of an internal error names this code, not the user's request."""
+
+    def leak(*args, **kwargs):
+        raise RuntimeError("psycopg2 could not connect to postgres:5432")
+
+    monkeypatch.setattr(web_app, "make_service_request", leak)
+
+    response = client.get("/db/query", query_string={"keyword": "harness"})
+
+    assert response.status_code == 500
+    assert response.json["message"] == web_app.GENERIC_ERROR_MESSAGE
+
+
+def test_a_failed_pipeline_step_reports_what_the_service_refused(client, monkeypatch):
+    def refuse(*args, **kwargs):
+        raise BadRequest("This website's robots.txt file does not allow scraping")
+
+    monkeypatch.setattr(web_app, "make_service_request", refuse)
+
+    response = client.post(
+        "/api/scrape", json={"url": "https://example.com", "keyword": "harness"}
+    )
+
+    assert response.status_code == 500
+    assert (
+        response.json["message"]
+        == "This website's robots.txt file does not allow scraping"
+    )

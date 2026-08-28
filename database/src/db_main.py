@@ -85,6 +85,7 @@ def query_items():
                     "href_url": item.href_url,
                     "relevance_score": item.relevance_score,
                     "job_id": item.job_id,
+                    "processed_date": item.processed_date.isoformat(),
                     "raw_data": item.raw_data,
                 }
                 for item in results

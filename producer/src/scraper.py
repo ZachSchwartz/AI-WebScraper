@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 MAX_REDIRECTS = 5
+# The suffix labels this scraper meets often enough to be worth stripping. A
+# complete list is the Public Suffix List, which is a dependency this heuristic
+# does not earn.
+PUBLIC_SUFFIX_LABELS = {"com", "org", "net", "edu", "gov", "io", "co", "uk"}
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -144,6 +148,27 @@ def clean_text(text: Union[str, Sequence[str], None]) -> Optional[str]:
     return text
 
 
+def registrable_name(netloc: str) -> Optional[str]:
+    """Reduce a host to the part of it that carries meaning for scoring.
+
+    A leading www and the trailing suffix say nothing about what a page is
+    about, so example.com and www.example.co.uk both come back as example.
+    Matching on whole labels rather than on substrings keeps the suffix of one
+    host from being cut out of the middle of another.
+    """
+    labels = [label for label in netloc.lower().split(".") if label]
+    if not labels:
+        return None
+
+    if labels[0] == "www":
+        labels = labels[1:]
+
+    while len(labels) > 1 and labels[-1] in PUBLIC_SUFFIX_LABELS:
+        labels = labels[:-1]
+
+    return labels[-1] if labels else None
+
+
 def process_url(url_str: str, processed_domains: Set[str]) -> List[str]:
     """Process a URL and return meaningful components."""
     if not url_str:
@@ -153,13 +178,10 @@ def process_url(url_str: str, processed_domains: Set[str]) -> List[str]:
     components = []
 
     # Process domain
-    if parsed.netloc:
-        domain = parsed.netloc.lower()
-        # Remove common prefixes and suffixes
-        domain = domain.replace("www.", "").replace(".com", "").replace(".org", "")
-        if domain and domain not in processed_domains:
-            components.append(domain)
-            processed_domains.add(domain)
+    domain = registrable_name(parsed.netloc)
+    if domain and domain not in processed_domains:
+        components.append(domain)
+        processed_domains.add(domain)
 
     # Process path
     if parsed.path:

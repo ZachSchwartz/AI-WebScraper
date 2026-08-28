@@ -15,9 +15,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY util/ /app/util/
 COPY web_service/src/ /app/src/
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app:/app/src
 EXPOSE 5000
 
 USER app
 
-CMD ["python", "src/app.py"]
+# The timeout outlasts three PIPELINE_TIMEOUT service calls, since this request
+# is held open for all of them; see Known Limitations in the README.
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", \
+     "--timeout", "600", "--access-logfile", "-", "app:app"]

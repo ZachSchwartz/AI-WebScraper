@@ -4,8 +4,10 @@ Database persistence for scored items taken off the Redis queue.
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from datetime import datetime
+from typing import Any, Callable, Dict, Optional
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.pool import QueuePool
@@ -13,23 +15,39 @@ from sqlalchemy.pool import QueuePool
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+LINK_IDENTITY = ("keyword", "source_url", "href_url")
+NOW = sa.text("CURRENT_TIMESTAMP")
+
+_UPSERT_INSERT: Dict[str, Callable[..., Any]] = {
+    "postgresql": postgresql.insert,
+    "sqlite": sqlite.insert,
+}
+
 
 class Base(DeclarativeBase):
     """Declarative base for the models this service stores."""
 
 
 class ScrapedItem(Base):
-    """Model for storing scraped items in the database."""
+    """One link, scored against the keyword the page was scraped for."""
 
     __tablename__ = "scraped_items"
+    __table_args__ = (
+        sa.UniqueConstraint(*LINK_IDENTITY, name="uq_scraped_items_link"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    keyword: Mapped[Optional[str]]
-    source_url: Mapped[str]
-    href_url: Mapped[Optional[str]]
-    relevance_score: Mapped[Optional[float]]
-    job_id: Mapped[Optional[str]]
-    raw_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(sa.JSON)
+    # The unique constraint indexes this as its leading column, which serves a
+    # filter on the keyword alone; a second index on it would be dead weight.
+    keyword: Mapped[str]
+    source_url: Mapped[str] = mapped_column(index=True)
+    href_url: Mapped[str] = mapped_column(index=True)
+    relevance_score: Mapped[Optional[float]] = mapped_column(index=True)
+    job_id: Mapped[Optional[str]] = mapped_column(index=True)
+    raw_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        sa.JSON().with_variant(postgresql.JSONB, "postgresql")
+    )
+    processed_date: Mapped[datetime] = mapped_column(server_default=NOW)
 
     def __repr__(self):
         return (
@@ -85,27 +103,32 @@ class DatabaseProcessor:
         self.engine = engine if engine is not None else self.get_engine()
         self.session = sessionmaker(bind=self.engine)
 
-    def check_existing_item(
-        self,
-        session,
-        keyword: Optional[str],
-        source_url: str,
-        href_url: Optional[str],
-    ) -> None:
-        """Delete the row a rescrape of this link is about to replace."""
-        existing_item = (
-            session.query(ScrapedItem)
-            .filter(
-                ScrapedItem.keyword == keyword,
-                ScrapedItem.source_url == source_url,
-                ScrapedItem.href_url == href_url,
-            )
-            .first()
-        )
+    def _upsert(self, values: Dict[str, Any]) -> sa.Executable:
+        """Build the statement that stores a link, replacing any earlier row.
 
-        if existing_item:
-            logger.info("Replacing existing item %d", existing_item.id)
-            session.delete(existing_item)
+        The unique constraint on the link is what makes a rescrape idempotent,
+        and the collision is settled by the database rather than by reading
+        first and writing after: two scrapes of one page running at once would
+        both find no existing row and both insert.
+        """
+        try:
+            insert = _UPSERT_INSERT[self.engine.dialect.name]
+        except KeyError as error:
+            raise NotImplementedError(
+                f"Storing a link needs an upsert, which {self.engine.dialect.name} "
+                "has no statement for"
+            ) from error
+
+        statement = insert(ScrapedItem).values(**values)
+        return statement.on_conflict_do_update(
+            index_elements=list(LINK_IDENTITY),
+            set_={
+                "relevance_score": statement.excluded.relevance_score,
+                "job_id": statement.excluded.job_id,
+                "raw_data": statement.excluded.raw_data,
+                "processed_date": NOW,
+            },
+        )
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -124,32 +147,39 @@ class DatabaseProcessor:
             Either way the caller drops the item rather than reporting an
             unstored link back to the user as a result.
         """
-        relevance_analysis = item.get("relevance_analysis", {})
-        if not relevance_analysis.get("source_url"):
-            raise ValueError("Item carries no scored link to store")
+        analysis = item.get("relevance_analysis", {})
+        values: Dict[str, Any] = {
+            column: analysis.get(column) for column in LINK_IDENTITY
+        }
+        if not all(values.values()):
+            raise ValueError("Item names no link, page, and keyword to store it under")
 
-        db_item = ScrapedItem(
-            keyword=relevance_analysis.get("keyword"),
-            source_url=relevance_analysis.get("source_url"),
-            href_url=relevance_analysis.get("href_url"),
-            relevance_score=relevance_analysis.get("score"),
-            job_id=item.get("job_id"),
-            raw_data=item,
-        )
+        values["relevance_score"] = analysis.get("score")
+        values["job_id"] = item.get("job_id")
+        values["raw_data"] = item
 
         session = self.session()
         try:
-            self.check_existing_item(
-                session, db_item.keyword, db_item.source_url, db_item.href_url
-            )
-            session.add(db_item)
+            session.execute(self._upsert(values))
             session.commit()
-            logger.debug("Stored %r", db_item)
+            logger.debug("Stored %s", values["href_url"])
         except SQLAlchemyError:
             session.rollback()
-            logger.exception("Failed to store %s", relevance_analysis.get("href_url"))
+            logger.exception("Failed to store %s", values["href_url"])
             raise
         finally:
             session.close()
 
         return item
+
+
+def ensure_schema(engine: Optional[sa.Engine] = None) -> None:
+    """Create the tables the models declare, if they are not there already.
+
+    The models are the only definition of this schema, so there is no
+    hand-written DDL for them to drift from. This is not a migration: a change
+    to a table that already exists still needs the volume recreated.
+    """
+    Base.metadata.create_all(
+        engine if engine is not None else DatabaseProcessor.get_engine()
+    )

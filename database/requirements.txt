@@ -12,3 +12,6 @@ werkzeug==3.1.8
 
 # Utilities
 requests==2.34.2
+
+# WSGI server
+gunicorn==26.2.0

@@ -19,11 +19,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY util/ /app/util/
 COPY scorer/src/ /app/src/
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app:/app/src
 
 ENV MODEL_CACHE_DIR=/app/model_cache
 RUN mkdir -p /app/model_cache && chown app:app /app/model_cache
 
 USER app
 
-CMD ["python", "src/scorer_main.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", \
+     "--timeout", "600", "--access-logfile", "-", "scorer_main:app"]

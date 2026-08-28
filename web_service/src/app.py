@@ -51,9 +51,18 @@ def sort_links(data: dict):
     ]
 
 
+GENERIC_ERROR_MESSAGE = "Unable to complete the request. Please try again later."
+
+
 def create_error_response(error: Exception, status_code: int = 500):
-    """Create a standardized error response"""
-    logger.error("%s: %s", error.__class__.__name__, str(error))
+    """Create a standardized error response.
+
+    An HTTPException carries a description a downstream service wrote for the
+    user, so it is passed on. Anything else is an internal failure whose text
+    describes this stack rather than the request, and the caller learns only
+    that it failed; the detail goes to the log instead.
+    """
+    logger.error("%s: %s", error.__class__.__name__, str(error), exc_info=True)
 
     if isinstance(error, HTTPException):
         return (
@@ -67,14 +76,14 @@ def create_error_response(error: Exception, status_code: int = 500):
             error.code,
         )
 
-    # Create a user-friendly error message
-    if isinstance(error, requests.exceptions.RequestException):
-        message = "Unable to complete the request. Please try again later."
-    else:
-        message = str(error)
-
     return (
-        jsonify({"error": "query_failed", "message": message, "status": "error"}),
+        jsonify(
+            {
+                "error": "query_failed",
+                "message": GENERIC_ERROR_MESSAGE,
+                "status": "error",
+            }
+        ),
         status_code,
     )
 
@@ -220,10 +229,28 @@ def scrape():
             }
         )
 
+    except HTTPException as e:
+        logger.warning("Pipeline step failed for job %s: %s", job_id, e.description)
+        return (
+            jsonify(
+                {
+                    "error": "scraping_failed",
+                    "message": e.description,
+                    "status": "error",
+                }
+            ),
+            500,
+        )
     except Exception as e:
         logger.error("Error in scrape endpoint: %s", str(e), exc_info=True)
         return (
-            jsonify({"error": "scraping_failed", "message": str(e), "status": "error"}),
+            jsonify(
+                {
+                    "error": "scraping_failed",
+                    "message": GENERIC_ERROR_MESSAGE,
+                    "status": "error",
+                }
+            ),
             500,
         )
 

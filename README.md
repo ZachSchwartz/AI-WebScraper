@@ -104,6 +104,9 @@ Mac:
 ```./build.sh --delete_db```
 
 
+### Upgrading an existing database:
+The schema is created from the models if the table is not already there, which means an existing volume keeps whatever it was built with. A database created before the unique constraint on `(keyword, source_url, href_url)` will not gain it; run `--delete_db` once to rebuild.
+
 ### Configuration:
 The stack runs out of the box on local development defaults. To change the database or pgAdmin credentials, copy `.env.example` to `.env` and edit it; Docker Compose picks it up automatically. `.env` is gitignored, so your values stay local.
 
@@ -119,9 +122,17 @@ pylint --disable=import-error database scorer producer util web_service tests
 mypy --ignore-missing-imports database scorer producer util web_service
 ```
 
-`pytest` reports coverage and fails below 80%; the thresholds live in `pytest.ini`. The annotations are checked rather than decorative, so `mypy` gates a merge alongside the tests. Redis is stubbed in process with `fakeredis` and the database tests run against SQLite, so no service needs to be up.
+`pytest` reports coverage and fails below 80%; the thresholds live in `pytest.ini`. The database tests run against SQLite, so the upsert that stores a link is built for whichever dialect the engine speaks. The annotations are checked rather than decorative, so `mypy` gates a merge alongside the tests. Redis is stubbed in process with `fakeredis` and the database tests run against SQLite, so no service needs to be up.
 
 The scorer service imports `torch` and `sentence-transformers` at module level, which together weigh over a gigabyte. Rather than install them to test scoring, `tests/conftest.py` substitutes a deterministic stand-in that embeds text as a hashed bag of words, so cosine similarity still rises with shared vocabulary and the scoring logic is exercised in full.
+
+
+## Serving
+Each service is served by gunicorn rather than the Flask development server that `app.run()` starts, and each image's `CMD` sets a worker count and timeout for what that service actually does: the scorer runs a single worker because a second would hold its own copy of the transformer and contend for the same cores, and every timeout is well above gunicorn's 30 second default because these requests drain a queue rather than answer from memory. The web service's is the longest, since it holds one request open across all three pipeline steps.
+
+
+## Storage
+A link is identified by the keyword, the page it was found on, and where it points, and a unique constraint on those three is what keeps a rescrape to one row. Storing a link is an upsert against that constraint rather than a read followed by a write, so two scrapes of the same page running at once cannot both find no existing row and both insert.
 
 
 ## Fetching Safety
@@ -178,7 +189,7 @@ For the link prioritization task, a sentence transformer was employed to avoid t
 
 2. Semantic Similarity: Embeddings for the text and keyword are compared using cosine similarity to measure their semantic relationship.
 
-3. Context Analysis: When an exact match is found, the surrounding context is checked to ensure the keyword is used meaningfully.
+3. Context Analysis: When an exact match is found, the words around each standalone occurrence are checked to ensure the keyword is used meaningfully. The strongest of those windows is the one that counts, so a link that uses the keyword well once is not diluted by the places the same page repeats it bare.
 
 4. Weighted Combination: The final score is computed by combining the exact match, semantic similarity, and context scores with weights 0.5, 0.3, and 0.2.
 
@@ -203,11 +214,11 @@ Worth knowing before reading the code, and the shortest path to fixing each.
 
 **One page per scrape.** `scrape()` reads `targets[0]` and ignores the rest of the list, and it does not follow the links it finds. There is no crawl depth and no per-domain rate limiting beyond `robots.txt`.
 
-**The schema is created by an init script, not migrations.** `database/init/db.sql` runs once, when the Postgres volume is first created, and has already drifted from the ORM model: `source_url` is `NOT NULL` on `ScrapedItem` but nullable in SQL, and `processed_date` exists only in SQL. Alembic would keep the two in step and make a schema change deployable without recreating the volume.
+**There are no migrations.** The models are now the only definition of the schema and `ensure_schema` creates it at startup, so there is no hand-written DDL left to drift from them. That is not the same as a migration: `create_all` skips a table that already exists, so changing a column still means recreating the volume with `--delete_db`. Alembic would make a schema change deployable without that.
 
 **`assert_fetchable` cannot survive DNS rebinding.** The guard resolves a hostname, then hands the URL to `requests`, which resolves it again. A name that changes its answer between those two lookups slips past. Closing it properly means pinning the validated address into the connection rather than re-resolving.
 
-**Scoring embeds one string at a time.** `_get_embedding` encodes each text individually and caches to disk, but `SentenceTransformer.encode` batches natively. A page with hundreds of links pays far more per-call overhead than it needs to.
+**Scoring batches within a link, not across them.** `_get_embeddings` sends every text one score needs to the model in a single call, but each link is still scored on its own. Batching a whole page into one `encode` would mean a queue contract that hands the processor a batch rather than an item, which all three services share.
 
 **No authentication or rate limiting.** Every endpoint is open to anyone who can reach the port. That is fine for a local stack and not fine for a deployed one.
 

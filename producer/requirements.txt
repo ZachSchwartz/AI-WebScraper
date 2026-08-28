@@ -11,3 +11,6 @@ redis==5.0.1
 # Web Framework
 flask==3.1.3
 werkzeug==3.1.8
+
+# WSGI server
+gunicorn==26.2.0

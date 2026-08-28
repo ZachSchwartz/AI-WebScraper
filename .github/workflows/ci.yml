@@ -44,8 +44,8 @@ jobs:
       - name: Build the service images
         run: docker compose build producer db_processor web
 
-      - name: Import each service entry point
+      - name: Load each service entry point under gunicorn
         run: |
-          docker compose run --rm --no-deps producer python -c "import sys; sys.path.insert(0, 'src'); import producer_main"
-          docker compose run --rm --no-deps db_processor python -c "import sys; sys.path.insert(0, 'src'); import db_main"
-          docker compose run --rm --no-deps web python -c "import sys; sys.path.insert(0, 'src'); import app"
+          docker compose run --rm --no-deps producer gunicorn --check-config producer_main:app
+          docker compose run --rm --no-deps db_processor gunicorn --check-config db_main:app
+          docker compose run --rm --no-deps web gunicorn --check-config app:app

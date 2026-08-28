@@ -21,8 +21,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY util/ /app/util/
 COPY database/src/ /app/src/
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app:/app/src
 
 USER app
 
-CMD ["python", "src/db_main.py"]
+CMD ["sh", "-c", "python -c 'from db_processor import ensure_schema; ensure_schema()' && \
+     exec gunicorn --bind 0.0.0.0:5000 --workers 2 --timeout 300 \
+     --access-logfile - db_main:app"]

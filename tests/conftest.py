@@ -52,9 +52,14 @@ class FakeSentenceTransformer:
         self.device = device
         return self
 
-    def encode(self, text: str, convert_to_numpy: bool = True) -> np.ndarray:
-        self.encoded.append(text)
-        return _encode(text)
+    def encode(self, texts, convert_to_numpy: bool = True) -> np.ndarray:
+        """Embed one text or a batch of them, as the real model does."""
+        if isinstance(texts, str):
+            self.encoded.append(texts)
+            return _encode(texts)
+
+        self.encoded.extend(texts)
+        return np.stack([_encode(text) for text in texts])
 
 
 def _redirect_model_cache() -> None:

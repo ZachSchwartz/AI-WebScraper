@@ -237,3 +237,22 @@ def test_robots_txt_that_cannot_be_read_does_not_block_the_fetch(monkeypatch):
     monkeypatch.setattr(scraper.RobotFileParser, "read", unreachable)
 
     assert scraper.is_allowed_by_robots("https://example.com", "test-agent") is True
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://www.example.com/", "example"),
+        ("https://example.co.uk/", "example"),
+        ("https://commerce.net/", "commerce"),
+        ("https://shop.example.com/", "example"),
+        ("https://notwww.example.org/", "example"),
+        ("https://localhost/", "localhost"),
+        ("/relative/path", None),
+    ],
+)
+def test_the_domain_component_keeps_only_the_meaningful_label(url, expected):
+    seen = set()
+    components = process_url(url, seen)
+
+    assert (components[0] if seen else None) == expected

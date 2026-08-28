@@ -6,7 +6,7 @@ with improved caching to prevent repeated downloads.
 import os
 import hashlib
 import logging
-from typing import Dict, Any
+from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 import torch
 import numpy as np
@@ -14,6 +14,27 @@ from sentence_transformers import SentenceTransformer, util
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+CONTEXT_WINDOW = 3
+
+
+def _sigmoid(value: float, steepness: float, midpoint: float = 0.0) -> float:
+    """Squash a similarity onto 0-1, sharpening the gap around the midpoint."""
+    return float(1 / (1 + np.exp(-steepness * (value - midpoint))))
+
+
+def context_windows(text_lower: str, keyword_lower: str) -> List[str]:
+    """The words surrounding each standalone occurrence of the keyword.
+
+    A keyword that only appears inside a longer word has no window here, so a
+    page that mentions it in passing scores on similarity alone.
+    """
+    words = text_lower.split()
+    return [
+        " ".join(words[max(0, index - CONTEXT_WINDOW) : index + CONTEXT_WINDOW + 1])
+        for index, word in enumerate(words)
+        if word == keyword_lower
+    ]
 
 
 class ScorerProcessor:
@@ -53,43 +74,72 @@ class ScorerProcessor:
         """Generate a cache key for text embedding."""
         return hashlib.md5(text.encode()).hexdigest()
 
-    def _get_embedding(self, text: str) -> np.ndarray:
-        """Get embedding for text with caching."""
-        # Check in-memory cache first
-        embedding_key = self._get_embedding_key(text)
-        if embedding_key in self.embedding_cache:
-            return self.embedding_cache[embedding_key]
+    def _cache_file(self, key: str) -> str:
+        """Where an embedding for this key is kept between runs."""
+        return os.path.join(self.embeddings_cache_dir, f"{key}.npy")
 
-        # Check file cache
-        embedding_file = os.path.join(self.embeddings_cache_dir, f"{embedding_key}.npy")
+    def _cached_embedding(self, key: str) -> Optional[np.ndarray]:
+        """Read an embedding from memory or disk, or None if neither holds it."""
+        if key in self.embedding_cache:
+            return self.embedding_cache[key]
+
+        embedding_file = self._cache_file(key)
         if os.path.exists(embedding_file):
             try:
                 embedding = np.load(embedding_file)
-                # Store in memory cache
-                self.embedding_cache[embedding_key] = embedding
+                self.embedding_cache[key] = embedding
                 return embedding
             except (OSError, ValueError):
                 logger.warning(
                     "Ignoring unreadable cached embedding %s", embedding_file
                 )
 
-        # Generate new embedding
-        embedding = self.model.encode(text, convert_to_numpy=True)
+        return None
 
-        # Save to file cache
+    def _store_embedding(self, key: str, embedding: np.ndarray) -> None:
+        """Keep an embedding for the rest of this run and for the next one."""
         try:
-            np.save(embedding_file, embedding)
+            np.save(self._cache_file(key), embedding)
         except OSError:
-            logger.warning("Could not cache an embedding to %s", embedding_file)
+            logger.warning("Could not cache an embedding to %s", self._cache_file(key))
 
-        # Store in memory cache
-        self.embedding_cache[embedding_key] = embedding
-        return embedding
+        self.embedding_cache[key] = embedding
+
+    def _get_embeddings(self, texts: List[str]) -> List[np.ndarray]:
+        """Embed every text, encoding the ones no cache holds in one pass.
+
+        The model batches natively, so the texts a single score needs cost one
+        call rather than one call each. Duplicates within the batch are encoded
+        once, which matters because a keyword repeats for every link on a page.
+        """
+        keys = [self._get_embedding_key(text) for text in texts]
+        embeddings: Dict[str, np.ndarray] = {}
+        missing: Dict[str, str] = {}
+
+        for key, text in zip(keys, texts):
+            if key in embeddings or key in missing:
+                continue
+            cached = self._cached_embedding(key)
+            if cached is None:
+                missing[key] = text
+            else:
+                embeddings[key] = cached
+
+        if missing:
+            encoded = self.model.encode(list(missing.values()), convert_to_numpy=True)
+            for key, embedding in zip(missing, encoded):
+                self._store_embedding(key, embedding)
+                embeddings[key] = embedding
+
+        return [embeddings[key] for key in keys]
 
     def generate_relevance_score(self, text: str, keyword: str) -> float:
         """
         Generate a relevance score between 0 and 1 for the text relative to the keyword.
         Uses semantic analysis with sentence transformers and intelligent scoring.
+
+        The strongest context wins, so a link that uses the keyword meaningfully
+        once is not diluted by the other places the same page repeats it.
 
         Args:
             text: Text to analyze
@@ -105,46 +155,29 @@ class ScorerProcessor:
         # 1. Exact match bonus (highest weight)
         exact_match = 1.0 if keyword_lower in text_lower else 0.0
 
+        contexts = context_windows(text_lower, keyword_lower) if exact_match else []
+        embeddings = self._get_embeddings([text, keyword, *contexts])
+        text_embedding, keyword_embedding = embeddings[0], embeddings[1]
+
         # 2. Semantic similarity using sentence transformer
-        # Get embeddings for text and keyword
-        text_embedding = self._get_embedding(text)
-        keyword_embedding = self._get_embedding(keyword)
-
-        # Calculate semantic similarity
-        semantic_sim = util.cos_sim(text_embedding, keyword_embedding).item()
-
-        # Normalize semantic similarity to 0-1 range
-        semantic_score = 1 / (1 + np.exp(-8 * semantic_sim))
+        semantic_score = _sigmoid(
+            util.cos_sim(text_embedding, keyword_embedding).item(), steepness=8
+        )
 
         # 3. Context analysis with increased weight for exact matches
-        context_score = 0.0
-        if exact_match > 0:
-            # If we have an exact match, analyze the surrounding context
-            text_parts = text_lower.split()
-            for i, word in enumerate(text_parts):
-                if word == keyword_lower:
-                    # Get context window
-                    start_idx = max(0, i - 3)
-                    end_idx = min(len(text_parts), i + 4)
-                    context_words = text_parts[start_idx:end_idx]
-
-                    # Create context embedding
-                    context_text = " ".join(context_words)
-                    context_embedding = self._get_embedding(context_text)
-
-                    # Calculate context relevance with steeper curve
-                    context_sim = util.cos_sim(
-                        context_embedding, keyword_embedding
-                    ).item()
-                    context_score = 1 / (1 + np.exp(-8 * context_sim))
+        context_score = max(
+            (
+                _sigmoid(util.cos_sim(embedding, keyword_embedding).item(), steepness=8)
+                for embedding in embeddings[2:]
+            ),
+            default=0.0,
+        )
 
         # Combine scores with polarized weighting
         score = 0.5 * exact_match + 0.3 * semantic_score + 0.2 * context_score
 
         # Apply a sigmoid transformation
-        score = 1 / (1 + np.exp(-10 * (score - 0.6)))
-
-        return score
+        return _sigmoid(score, steepness=10, midpoint=0.6)
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """

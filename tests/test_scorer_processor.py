@@ -3,6 +3,7 @@
 # pylint: disable=missing-function-docstring
 
 import pytest
+from scorer_processor import context_windows
 
 
 def test_keyword_match_outscores_unrelated_text(scorer_processor):
@@ -109,3 +110,37 @@ def test_process_item_leaves_the_queued_item_untouched(scorer_processor):
 
     assert "relevance_analysis" not in item
     assert result["href"] == "/guide"
+
+
+def test_scoring_a_link_costs_a_single_pass_through_the_model(scorer_processor):
+    """The texts one score needs go to the model together, not one at a time."""
+    calls = []
+    encode = scorer_processor.model.encode
+    scorer_processor.model.encode = lambda texts, **kwargs: (
+        calls.append(texts) or encode(texts, **kwargs)
+    )
+
+    scorer_processor.generate_relevance_score(
+        "a climbing harness guide to every climbing harness", "harness"
+    )
+
+    assert len(calls) == 1
+    # The text, the keyword, and a window around each standalone occurrence.
+    assert len(calls[0]) == 4
+
+
+def test_a_context_window_is_taken_around_each_standalone_occurrence():
+    assert context_windows("buy a harness for climbing and a rope", "harness") == [
+        "buy a harness for climbing and"
+    ]
+
+
+def test_every_occurrence_gets_its_own_window_to_be_scored_on():
+    assert context_windows("a harness and another harness", "harness") == [
+        "a harness and another harness",
+        "harness and another harness",
+    ]
+
+
+def test_a_keyword_inside_a_longer_word_has_no_context_window():
+    assert context_windows("harnesses on sale", "harness") == []

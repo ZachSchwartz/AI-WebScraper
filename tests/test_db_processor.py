@@ -4,8 +4,8 @@
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.exc import SQLAlchemyError
-from db_processor import Base, DatabaseProcessor, ScrapedItem
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from db_processor import Base, DatabaseProcessor, ScrapedItem, ensure_schema
 
 
 @pytest.fixture
@@ -97,3 +97,64 @@ def test_the_repr_names_the_columns_the_model_actually_has(processor, scored):
         "<ScrapedItem(id=1, href_url='https://example.com/harness', "
         "relevance_score=0.8)>"
     )
+
+
+def test_the_database_refuses_a_second_row_for_the_same_link(processor, scored):
+    """The constraint, not the write path, is what keeps a link to one row.
+
+    Two scrapes of a page running at once would both find no existing row, so
+    the guarantee has to live somewhere neither of them can race past.
+    """
+    processor.process_item(scored())
+
+    session = processor.session()
+    try:
+        session.add(
+            ScrapedItem(
+                keyword="harness",
+                source_url="https://example.com/",
+                href_url="https://example.com/harness",
+                relevance_score=0.1,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+    finally:
+        session.rollback()
+        session.close()
+
+
+def test_a_rescrape_keeps_the_row_it_replaces(processor, scored):
+    processor.process_item(scored(score=0.3))
+    first_id = stored_items(processor)[0].id
+
+    processor.process_item(scored(score=0.9))
+
+    assert stored_items(processor)[0].id == first_id
+
+
+@pytest.mark.parametrize("missing", ["keyword", "source_url", "href_url"])
+def test_a_link_missing_part_of_its_identity_is_rejected(processor, scored, missing):
+    item = scored()
+    del item["relevance_analysis"][missing]
+
+    with pytest.raises(ValueError):
+        processor.process_item(item)
+
+
+def test_an_engine_with_no_upsert_says_so_rather_than_storing_a_duplicate(
+    processor, scored, monkeypatch
+):
+    monkeypatch.setattr(type(processor.engine.dialect), "name", "oracle")
+
+    with pytest.raises(NotImplementedError):
+        processor.process_item(scored())
+
+
+def test_ensure_schema_creates_the_tables_the_models_declare():
+    engine = sa.create_engine("sqlite://")
+
+    ensure_schema(engine)
+
+    assert "scraped_items" in sa.inspect(engine).get_table_names()
+    engine.dispose()
