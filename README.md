@@ -19,6 +19,43 @@ The application supports three primary API endpoints:
 
 This README provides setup instructions, API details, and information on how relevance scoring is performed.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    Browser([Browser])
+    Site([Target site])
+    PgAdmin([pgAdmin :5050])
+
+    subgraph Services
+        Web["web :8080"]
+        Producer["producer"]
+        Scorer["scorer"]
+        DBSvc["db_processor"]
+    end
+
+    Redis[("Redis")]
+    Postgres[("PostgreSQL")]
+
+    Browser -->|"POST /api/scrape"| Web
+    Web -->|"step 1: /scrape"| Producer
+    Producer -->|"fetch page, extract links"| Site
+    Producer -->|"publish to scraped_items"| Redis
+    Web -->|"step 2: /process"| Scorer
+    Scorer -->|"drain, score, republish"| Redis
+    Web -->|"step 3: /process with job_id"| DBSvc
+    DBSvc -->|"drain scraped_items_processed"| Redis
+    DBSvc -->|"store rows"| Postgres
+
+    Browser -->|"GET /db/query"| Web
+    Web -->|"proxy query"| DBSvc
+    PgAdmin -->|"ad hoc SQL"| Postgres
+```
+
+The web service holds the browser's request open while it drives all three steps in
+order; the numbered calls above happen one after another within a single
+`POST /api/scrape`. See [Known Limitations](#known-limitations) for what that costs.
+
 
 ## Setup Instructions
 
@@ -149,6 +186,25 @@ If you wish to access the database to perform your own queries, or check out the
 4. Open scraper > databases > scraper > schemas > public > tables > scraped_items
 5. Right click on scraped_items, and select "Query Tool"
 6. You can now run any psql command you'd like on the database
+
+
+## Known Limitations
+
+Worth knowing before reading the code, and the shortest path to fixing each.
+
+**The pipeline is orchestrated synchronously.** `web_service` calls the producer, then the scorer, then the database service in sequence, holding the HTTP request open for the whole run (`PIPELINE_TIMEOUT`, 180s by default). The Redis queues decouple the *services* but not the *request*, so the queue does less work than the architecture suggests. The fix is a job-status endpoint: `/api/scrape` returns its `job_id` immediately, workers drain the queues on their own schedule, and the page polls for results. Celery or RQ would cover it.
+
+**Concurrent scrapes interleave.** The scorer's `/process` drains the whole queue rather than one job's items. If two scrapes overlap, the first request's scorer pass can consume the second's links. Rows are still stored under the correct `job_id`, but the second request can return zero results for work that did complete. Scoping each drain to a job, or giving each job its own queue key, closes this.
+
+**One page per scrape.** `scrape()` reads `targets[0]` and ignores the rest of the list, and it does not follow the links it finds. There is no crawl depth and no per-domain rate limiting beyond `robots.txt`.
+
+**The schema is created by an init script, not migrations.** `database/init/db.sql` runs once, when the Postgres volume is first created, and has already drifted from the ORM model: `source_url` is `NOT NULL` on `ScrapedItem` but nullable in SQL, and `processed_date` exists only in SQL. Alembic would keep the two in step and make a schema change deployable without recreating the volume.
+
+**`assert_fetchable` cannot survive DNS rebinding.** The guard resolves a hostname, then hands the URL to `requests`, which resolves it again. A name that changes its answer between those two lookups slips past. Closing it properly means pinning the validated address into the connection rather than re-resolving.
+
+**Scoring embeds one string at a time.** `_get_embedding` encodes each text individually and caches to disk, but `SentenceTransformer.encode` batches natively. A page with hundreds of links pays far more per-call overhead than it needs to.
+
+**No authentication or rate limiting.** Every endpoint is open to anyone who can reach the port. That is fine for a local stack and not fine for a deployed one.
 
 
 ## License
