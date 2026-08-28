@@ -16,46 +16,87 @@ from bs4 import BeautifulSoup
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
 from util.error_util import format_error
-from util.url_util import normalize_url
+from util.url_util import UrlNotAllowed, assert_fetchable
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+MAX_REDIRECTS = 5
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+)
+
+
 def is_allowed_by_robots(url: str, user_agent: str) -> bool:
-    """Check if the URL is allowed by robots.txt."""
-    rp = RobotFileParser()
-    rp.set_url(urljoin(url, "/robots.txt"))
-    rp.read()
-    if not rp.can_fetch(user_agent, url):
-        logger.info("Skipping %s (disallowed by robots.txt)", url)
-        raise Exception(f"URL {url} is disallowed by robots.txt")
+    """Check whether robots.txt permits fetching the URL.
+
+    A site that serves no reachable robots.txt is stating no restriction, so a
+    transport failure reading it is treated as permission rather than refusal.
+    RobotFileParser already maps the status codes that do carry meaning: 4xx
+    allows everything, 5xx allows nothing.
+    """
+    parser = RobotFileParser()
+    parser.set_url(urljoin(url, "/robots.txt"))
+    try:
+        parser.read()
+    except OSError as error:
+        logger.info("No readable robots.txt for %s: %s", url, error)
+        return True
+
+    return parser.can_fetch(user_agent, url)
+
+
+def fetch_page(url: str, headers: Dict[str, str], timeout: int) -> requests.Response:
+    """Fetch a URL, checking every redirect hop before following it.
+
+    requests follows redirects on its own, which would let a public URL bounce
+    the fetch onto the private network assert_fetchable exists to keep it off.
+
+    Raises:
+        UrlNotAllowed: if a hop leaves the public web or the chain never ends.
+    """
+    location = url
+    for _ in range(MAX_REDIRECTS):
+        response = requests.get(
+            location, headers=headers, timeout=timeout, allow_redirects=False
+        )
+        if not response.is_redirect:
+            return response
+
+        location = assert_fetchable(
+            urljoin(location, response.headers.get("Location", ""))
+        )
+
+    raise UrlNotAllowed(f"URL {url} redirected more than {MAX_REDIRECTS} times")
 
 
 def fetch_with_requests(
     url: str, headers: Dict[str, str], timeout: int, retry_count: int
 ) -> Optional[Dict[str, Any]]:
     """Fetch URL content using requests library with rate limiting."""
-    try:
-        is_allowed_by_robots(url, headers["User-Agent"])
-    except Exception as e:
-        logger.error("Robots.txt error for %s: %s", url, str(e))
+    if not is_allowed_by_robots(url, headers["User-Agent"]):
+        logger.info("Skipping %s (disallowed by robots.txt)", url)
         return format_error(
             "robots_txt_error",
-            f"This website's robots.txt file does not allow scraping: {str(e)}",
+            f"This website's robots.txt file does not allow scraping {url}",
             url,
         )
 
     for attempt in range(retry_count):
         try:
-            response = requests.get(url, headers=headers, timeout=timeout)
+            response = fetch_page(url, headers, timeout)
             response.raise_for_status()
             if not response.text:
                 return format_error(
                     "empty_response", f"Received empty response from {url}", url
                 )
             return {"content": response.text}
+        except UrlNotAllowed as e:
+            logger.warning("Refusing to follow %s: %s", url, e)
+            return format_error("url_not_allowed", str(e), url)
         except requests.exceptions.RequestException as e:
             logger.warning(
                 "Warning: Attempt %d/%d failed for %s: %s",
@@ -172,7 +213,7 @@ def extract_context(link: BeautifulSoup) -> Dict[str, Any]:
         if headings:
             context["heading_hierarchy"] = headings
     except Exception as e:
-        print(f"Warning: Error extracting context: {str(e)}")
+        logger.warning("Error extracting context: %s", e)
     return context
 
 
@@ -345,7 +386,11 @@ def scrape_target(
             logger.error("No URL specified in target config")
             return format_error("missing_url", "No URL specified in target config")
 
-        url = normalize_url(url)
+        try:
+            url = assert_fetchable(url)
+        except UrlNotAllowed as error:
+            logger.warning("Refusing to fetch %s: %s", url, error)
+            return format_error("url_not_allowed", str(error), url)
         target_config["url"] = url
 
         logger.info("Fetching content from %s", url)
@@ -359,24 +404,19 @@ def scrape_target(
         if "error" in response:
             return response
 
-        # If we have content, parse it
-        if "content" in response:
-            results = parse_content(response["content"], target_config)
-            logger.info("Found %d items from %s", len(results), url)
-            return {"results": results}
+        # Anything that is not an error carries content to parse.
+        results = parse_content(response["content"], target_config)
+        logger.info("Found %d items from %s", len(results), url)
+        return {"results": results}
 
     except Exception as e:
         logger.error("Error scraping target %s: %s", url, str(e), exc_info=True)
         return format_error("scraping_error", str(e), url)
 
-    return format_error("unknown_error", "Unknown error occurred during scraping")
-
 
 def scrape(config: Dict[str, Any]) -> Dict[str, Any]:
     """Main scraping function that processes all targets in the config."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
+    headers = {"User-Agent": USER_AGENT}
     timeout = 30
     retry_count = 3
 

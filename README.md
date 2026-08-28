@@ -37,7 +37,8 @@ Mac (first make the script executable with `chmod +x build.sh`):
 
 
 Subsequent Runs:
-Run to start the application.
+Run to start the application. Each service image carries its own source, so pass
+`--build` after changing any code.
 
 Windows:
 
@@ -65,7 +66,7 @@ The stack runs out of the box on local development defaults. To change the datab
 
 
 ## Running the Tests
-The test suite runs outside Docker and needs no model download. Every check below also runs in CI on each push.
+The test suite runs outside Docker and needs no model download. Every check below also runs in CI on each push, alongside a build of the service images.
 
 ```
 pip install -r requirements-dev.txt
@@ -74,7 +75,13 @@ black --check database scorer producer util web_service tests
 pylint --disable=import-error database scorer producer util web_service tests
 ```
 
+`pytest` reports coverage and fails below 80%; the thresholds live in `pytest.ini`. Redis is stubbed in process with `fakeredis` and the database tests run against SQLite, so no service needs to be up.
+
 The scorer service imports `torch` and `sentence-transformers` at module level, which together weigh over a gigabyte. Rather than install them to test scoring, `tests/conftest.py` substitutes a deterministic stand-in that embeds text as a hashed bag of words, so cosine similarity still rises with shared vocabulary and the scoring logic is exercised in full.
+
+
+## Fetching Safety
+The scraper fetches whatever URL it is handed, which would otherwise make it a way to reach the private network the services run on. `util/url_util.assert_fetchable` resolves each host and refuses anything that is not a public address, so the Redis and Postgres containers, localhost, and the cloud metadata endpoint are all out of reach. Redirects are followed one hop at a time and checked the same way, since a public URL is free to redirect somewhere private. `robots.txt` is honoured before any page is fetched.
 
 
 ## API Overview

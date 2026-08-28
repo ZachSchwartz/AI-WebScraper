@@ -20,21 +20,20 @@ processor = ScorerProcessor()
 
 @app.route("/health", methods=["GET"])
 def health_check():
+    """Report whether this service can reach the queue."""
     return perform_health_check("scorer_processor")
 
 
 @app.route("/process", methods=["POST"])
 def process_endpoint():
     """API endpoint to trigger queue processing."""
+    queue_util = QueueManager(QueueManager.get_redis_config(wait_time=10))
     try:
-        # Initialize Redis connection with longer wait time for scorer processing
-        queue_util = QueueManager(QueueManager.get_redis_config(wait_time=10))
-
-        processed_items = queue_util.process_queue(processor.process_item)
-
-        return jsonify({"message": processed_items})
+        return jsonify({"message": queue_util.process_queue(processor.process_item)})
     except Exception as e:
-        return format_error("scorer_processor_error", str(e))
+        return jsonify(format_error("scorer_processor_error", str(e))), 500
+    finally:
+        queue_util.close()
 
 
 if __name__ == "__main__":

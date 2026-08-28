@@ -21,6 +21,7 @@ app = Flask(__name__)
 
 @app.route("/health", methods=["GET"])
 def health_check():
+    """Report whether this service can reach the queue."""
     return perform_health_check("db_processor")
 
 
@@ -28,7 +29,7 @@ def health_check():
 def process_endpoint():
     """API endpoint to trigger queue processing."""
     try:
-        job_id = (request.json or {}).get("job_id")
+        job_id = (request.get_json(silent=True) or {}).get("job_id")
 
         # Initialize Redis connection with processed queue
         queue_util = QueueManager(
@@ -37,8 +38,10 @@ def process_endpoint():
 
         # Initialize database processor
         db_processor = DatabaseProcessor()
-        # Process items from the queue
-        items = queue_util.process_queue(db_processor.process_item)
+        try:
+            items = queue_util.process_queue(db_processor.process_item)
+        finally:
+            queue_util.close()
 
         if job_id:
             items = [item for item in items if item.get("job_id") == job_id]

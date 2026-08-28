@@ -14,13 +14,12 @@ COPY scorer/requirements.txt /app/
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
 
-# Copy queue_util.py from root directory
-COPY util/queue_util.py /app/
-COPY util/health_util.py /app/
-COPY util/error_util.py /app/
+COPY util/ /app/util/
+COPY scorer/src/ /app/src/
 
-# Set Python path to include app directory
 ENV PYTHONPATH=/app
 
-# Note: Source code will be mounted as a volume in docker-compose.yml
-# CMD is set in docker-compose or when running the container
+ENV MODEL_CACHE_DIR=/app/model_cache
+RUN mkdir -p /app/model_cache
+
+CMD ["python", "src/scorer_main.py"]

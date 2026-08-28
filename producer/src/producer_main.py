@@ -2,11 +2,11 @@
 Main entry point for the web scraper producer.
 """
 
+import copy
 import os
 import sys
 import logging
-import json
-from typing import Dict, Any
+from typing import Any, Dict
 from flask import Flask, request, jsonify
 from scraper import scrape
 
@@ -25,6 +25,7 @@ app = Flask(__name__)
 
 @app.route("/health", methods=["GET"])
 def health_check():
+    """Report whether this service can reach the queue."""
     return perform_health_check("producer")
 
 
@@ -62,81 +63,72 @@ SCRAPER_CONFIG = {
 def run_scraper(
     queue_util: QueueManager, target_url: str, target_keyword: str, job_id: str = None
 ) -> Dict[str, Any]:
-    """Run the scraper and publish results to the queue."""
-    print("Starting scraping job")
+    """Scrape one target and publish every link it found to the queue.
 
-    SCRAPER_CONFIG["targets"][0]["url"] = target_url
-    SCRAPER_CONFIG["targets"][0]["keyword"] = target_keyword
-    result = scrape(SCRAPER_CONFIG)
+    Returns:
+        A summary of what was published, or a formatted error. A page with no
+        links publishes nothing and is reported as a count of zero rather than
+        as a failure.
+    """
+    logger.info("Starting scraping job %s for %s", job_id, target_url)
 
-    # Check if we got an error response
-    if isinstance(result, dict):
-        if "error" in result:
-            return format_error(
-                "scraping_failed",
-                "Please check if url is spelled correctly, or website may not allow scraping",
-            )
+    # The config is module level and Flask serves requests concurrently, so each
+    # job fills in a copy rather than overwriting the shared template.
+    config = copy.deepcopy(SCRAPER_CONFIG)
+    config["targets"][0]["url"] = target_url
+    config["targets"][0]["keyword"] = target_keyword
 
-        results = result["results"]
-        if results:
-            print(f"Scraped {len(results)} items")
+    result = scrape(config)
+    if "error" in result:
+        logger.warning("Scrape of %s failed: %s", target_url, result.get("message"))
+        return result
 
-            for item in results:
-                item["job_id"] = job_id
-                queue_util.publish_item(item)
+    results = result.get("results", [])
+    published = sum(1 for item in results if _publish(queue_util, item, job_id))
+    logger.info("Published %d of %d items to the queue", published, len(results))
 
-            print(f"Published {len(results)} items to queue")
+    return {"job_id": job_id, "url": target_url, "published": published}
 
-            queue_name = "scraped_items"
-            item_json = queue_util.redis_client.rpop(queue_name)
 
-            if item_json:
-                first_item = json.loads(item_json)
-                # Push the item back to the front of the queue since we want to keep it
-                queue_util.redis_client.lpush(queue_name, item_json)
-                queue_util.close()
-                return first_item
+def _publish(queue_util: QueueManager, item: Dict[str, Any], job_id: str) -> bool:
+    """Tag an item with its job and hand it to the queue."""
+    item["job_id"] = job_id
+    return queue_util.publish_item(item)
 
 
 @app.route("/scrape", methods=["POST"])
 def scrape_endpoint():
     """API endpoint to handle scraping requests."""
-    logger.info("Received scrape request")
-    data = request.json
-    logger.info("Request data: %s", data)
-
+    data = request.get_json(silent=True) or {}
     url = data.get("url")
     keyword = data.get("keyword")
-    job_id = data.get("job_id")
 
-    logger.info("Initializing queue manager")
-    queue_config = QueueManager.get_redis_config()
-    logger.info("Queue config: %s", queue_config)
-    queue_util = QueueManager(queue_config)
+    if not url or not keyword:
+        return (
+            jsonify(
+                format_error("missing_parameter", "Both url and keyword are required")
+            ),
+            400,
+        )
 
-    logger.info("Starting scraper")
-    result = run_scraper(queue_util, url, keyword, job_id)
+    queue_util = QueueManager(QueueManager.get_redis_config())
+    try:
+        result = run_scraper(queue_util, url, keyword, data.get("job_id"))
+    finally:
+        queue_util.close()
 
-    # Check if we got an error response
-    if isinstance(result, dict) and "error" in result:
+    if "error" in result:
         return jsonify(result), 400
 
-    # If we have a valid result, return it
-    if result:
-        return jsonify(result)
+    return jsonify(result)
 
 
 def main(target_url: str, target_keyword: str) -> None:
     """Main entry point for the scraper when run directly."""
     queue_util = QueueManager(QueueManager.get_redis_config())
-    print("Queue manager initialized")
-
     try:
-        print(f"Scraping URL: {target_url} with keyword: {target_keyword} in main")
-        first_item = run_scraper(queue_util, target_url, target_keyword)
-        if first_item:
-            print("First item from queue:")
-            print(json.dumps(first_item, indent=2))
+        logger.info("Scraping %s for %s", target_url, target_keyword)
+        logger.info("Result: %s", run_scraper(queue_util, target_url, target_keyword))
     finally:
         queue_util.close()
 

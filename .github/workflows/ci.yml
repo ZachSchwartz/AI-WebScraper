@@ -26,5 +26,17 @@ jobs:
       - name: Lint
         run: pylint --disable=import-error database scorer producer util web_service tests
 
+      # pytest.ini enforces the coverage floor, so this fails on a drop as well
+      # as on a broken test.
       - name: Test
         run: pytest
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The images carry their own source, so a build failure here is a real
+      # deployment failure rather than a missing bind mount at run time.
+      - name: Build the service images
+        run: docker compose build producer db_processor web

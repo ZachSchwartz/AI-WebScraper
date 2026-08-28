@@ -58,10 +58,6 @@ services:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
       - SCORER_SERVICE_URL=http://scorer:5000
-    volumes:
-      - ./producer/src:/app/src
-      - ./util:/app/util
-    command: python src/producer_main.py
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s
@@ -86,22 +82,14 @@ services:
       - TRANSFORMERS_CACHE=/app/model_cache
       - HF_HOME=/app/model_cache
     volumes:
-      - ./scorer/src:/app/src
+      # Keeps the downloaded model across rebuilds; everything else is baked in.
       - model_cache:/app/model_cache
-      - ./util:/app/util
-    user: root  # Temporarily use root to ensure cache directory permissions
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-    command: >
-      bash -c "
-        mkdir -p /app/model_cache &&
-        chmod -R 777 /app/model_cache &&
-        python src/scorer_main.py
-      "
 
   db_processor:
     build:
@@ -122,21 +110,17 @@ services:
       - DB_PASSWORD=${POSTGRES_PASSWORD:-postgres}
       - DB_NAME=${POSTGRES_DB:-scraper}
       - REDIS_HOST=redis
-    volumes:
-      - ./database/src:/app/src
-      - ./util:/app/util
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-    command: python src/db_main.py
 
   web:
     build:
-      context: ./web_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: web_service/Dockerfile
     ports:
       - "8080:5000"
     depends_on:

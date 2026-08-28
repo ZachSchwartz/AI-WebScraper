@@ -10,13 +10,18 @@ logic can be exercised without the real model.
 
 # pylint: disable=missing-function-docstring,unused-argument,import-outside-toplevel
 
+import os
+import socket
 import sys
+import tempfile
 import types
 import zlib
+import fakeredis
 import numpy as np
 import pytest
 
 EMBEDDING_DIM = 256
+PUBLIC_ADDRESS = "93.184.216.34"
 
 
 def _encode(text: str) -> np.ndarray:
@@ -52,6 +57,15 @@ class FakeSentenceTransformer:
         return _encode(text)
 
 
+def _redirect_model_cache() -> None:
+    """Point the model cache somewhere writable.
+
+    The scorer defaults it to an absolute container path and builds a processor
+    at import time, so this has to be set before any test imports that module.
+    """
+    os.environ.setdefault("MODEL_CACHE_DIR", tempfile.mkdtemp(prefix="scorer-cache-"))
+
+
 def _install_stubs() -> None:
     """Register stub modules before scorer_processor is imported."""
     torch = types.ModuleType("torch")
@@ -64,6 +78,7 @@ def _install_stubs() -> None:
     sys.modules.setdefault("sentence_transformers", sentence_transformers)
 
 
+_redirect_model_cache()
 _install_stubs()
 
 
@@ -74,3 +89,88 @@ def scorer_processor(tmp_path, monkeypatch):
     from scorer_processor import ScorerProcessor
 
     return ScorerProcessor()
+
+
+@pytest.fixture(autouse=True)
+def resolves_publicly(monkeypatch):
+    """Answer every hostname with a public address.
+
+    assert_fetchable resolves the hosts it is asked about, and no test should
+    depend on DNS. Tests covering rejected addresses override this.
+    """
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                (PUBLIC_ADDRESS, 0),
+            )
+        ],
+    )
+
+
+@pytest.fixture
+def resolves_to(monkeypatch):
+    """Point every hostname at a chosen address."""
+
+    def _resolve_to(address):
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *args, **kwargs: [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    (address, 0),
+                )
+            ],
+        )
+
+    return _resolve_to
+
+
+@pytest.fixture
+def queue_manager(monkeypatch):
+    """A QueueManager backed by an in-process Redis, polling without delay.
+
+    Every QueueManager built while the test runs shares one store, so a service
+    endpoint can construct its own and still see what the test published.
+    """
+    from util import queue_util
+    from util.queue_util import QueueManager
+
+    server = fakeredis.FakeServer()
+    monkeypatch.setattr(
+        QueueManager,
+        "get_redis_client",
+        classmethod(
+            lambda cls: fakeredis.FakeRedis(server=server, decode_responses=True)
+        ),
+    )
+    # Polling an empty queue waits between attempts; no test should wait with it.
+    monkeypatch.setattr(queue_util.time, "sleep", lambda seconds: None)
+    return QueueManager({"queue_name": "scraped_items"})
+
+
+@pytest.fixture
+def scored():
+    """Build a queue item shaped the way the scorer leaves it."""
+
+    def _scored(href="https://example.com/harness", score=0.8, job_id="job-1"):
+        return {
+            "job_id": job_id,
+            "relevance_analysis": {
+                "keyword": "harness",
+                "source_url": "https://example.com/",
+                "href_url": href,
+                "score": score,
+            },
+        }
+
+    return _scored

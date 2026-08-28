@@ -6,7 +6,9 @@ fail-under=9.5
 max-line-length=120
 
 [MESSAGES CONTROL]
-# broad-exception-caught: services degrade to a formatted error rather than crash.
+# broad-exception-caught: at request handlers and per-item queue boundaries a
+#   service degrades to a formatted error rather than crashing. Failures that
+#   must not be swallowed, such as a database write, raise past those handlers.
 # wrong-import-position: shared util imports follow the sys.path shim each service needs.
 disable=
     broad-exception-caught,

@@ -3,11 +3,14 @@ Queue manager for handling Redis queue operations.
 """
 
 import json
+import logging
 import time
 import os
 from typing import Dict, Any, Optional, Callable, List
 import redis
-from util.error_util import format_error
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class QueueManager:
@@ -46,14 +49,11 @@ class QueueManager:
         """
         self.queue_name = config.get("queue_name", "scraped_items")
         self.processed_queue_name = f"{self.queue_name}_processed"
-        self.host = config.get("host", "localhost")
-        self.port = config.get("port", 6379)
-        self.password = config.get("password", "")
         self.batch_size = config.get("batch_size", 10)
+        self.wait_time = config.get("wait_time", 5)
+        self.max_idle_polls = config.get("max_idle_polls", 3)
+        self.max_iterations = config.get("max_iterations", 1000)
         self.redis_client = self.get_redis_client()
-
-        # Initialize connection
-        self._connect()
 
     @classmethod
     def get_redis_client(cls) -> redis.Redis:
@@ -66,26 +66,16 @@ class QueueManager:
         Raises:
             redis.RedisError: If connection fails
         """
-        try:
-            # Get Redis connection details from environment variables or use defaults
-            host = os.environ.get("REDIS_HOST", "redis")
-            port = int(os.environ.get("REDIS_PORT", "6379"))
+        host = os.environ.get("REDIS_HOST", "redis")
+        port = int(os.environ.get("REDIS_PORT", "6379"))
 
+        try:
             client = redis.Redis(host=host, port=port, decode_responses=True)
             client.ping()  # Test connection
+            logger.info("Connected to Redis at %s:%s", host, port)
             return client
-        except redis.RedisError as e:
-            format_error("redis_connection_error", str(e))
-            raise
-
-    def _connect(self) -> None:
-        """Establish connection to Redis."""
-        try:
-            print(f"Attempting to connect to Redis at {self.host}:{self.port}")
-            self.redis_client = self.get_redis_client()
-            print(f"Successfully connected to Redis at {self.host}:{self.port}")
-        except redis.RedisError as e:
-            format_error("redis_connection_error", str(e))
+        except redis.RedisError:
+            logger.exception("Could not connect to Redis at %s:%s", host, port)
             raise
 
     def publish_item(self, item: Dict[str, Any]) -> bool:
@@ -99,14 +89,10 @@ class QueueManager:
             True if successful, False otherwise
         """
         try:
-            # Serialize the item to JSON
-            message = json.dumps(item)
-
-            # Push to Redis list
-            self.redis_client.lpush(self.queue_name, message)
+            self.redis_client.lpush(self.queue_name, json.dumps(item))
             return True
-        except Exception as e:
-            format_error("redis_publish_error", str(e))
+        except (redis.RedisError, TypeError, ValueError):
+            logger.exception("Could not publish an item to %s", self.queue_name)
             return False
 
     def get_item(self) -> Optional[Dict[str, Any]]:
@@ -121,8 +107,8 @@ class QueueManager:
             item_json = self.redis_client.rpop(self.queue_name)
             if item_json:
                 return json.loads(item_json)
-        except Exception as e:
-            format_error("redis_get_item_error", str(e))
+        except (redis.RedisError, ValueError):
+            logger.exception("Could not read an item from %s", self.queue_name)
         return None
 
     def get_batch(self) -> List[Dict[str, Any]]:
@@ -152,74 +138,68 @@ class QueueManager:
             True if successful, False otherwise
         """
         try:
-            # Push to processed queue
             self.redis_client.lpush(self.processed_queue_name, json.dumps(item))
-            print(f"Added item to processed queue '{self.processed_queue_name}'")
             return True
-        except Exception as e:
-            format_error("redis_update_item_error", str(e))
+        except (redis.RedisError, TypeError, ValueError):
+            logger.exception(
+                "Could not publish an item to %s", self.processed_queue_name
+            )
             return False
 
     def process_queue(
         self, processor: Callable[[Dict[str, Any]], Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Process items from the queue continuously.
+        Drain the queue, handing every item to the processor.
+
+        An item whose processor raises is dropped rather than forwarded, so a
+        failure downstream never reports itself upstream as a success.
 
         Args:
-            processor: Callback function to process each item. Accepts either a standalone
-                      function or a bound method.
+            processor: Callback function to process each item. Accepts either a
+                       standalone function or a bound method.
 
         Returns:
             List of successfully processed items
         """
-        print("Starting queue processing")
-        processed_count = 0
-        iteration_count = 0
-        max_iterations = getattr(
-            self, "max_iterations", 1000
-        )  # Default to 1000 if not set
+        logger.info("Draining queue %s", self.queue_name)
         processed_items = []
+        idle_polls = 0
 
         try:
-            while iteration_count < max_iterations:
+            for _ in range(self.max_iterations):
                 items = self.get_batch()
-                if items:
-                    print(f"Processing batch of {len(items)} items")
-                    for item in items:
-                        try:
-                            # Process the item
-                            processed_item = processor(item)
-
-                            if self.update_item(processed_item):
-                                processed_count += 1
-                                processed_items.append(processed_item)
-
-                        except Exception as e:
-                            print(format_error("processing_error", str(e)))
-                            # Don't count failed items as processed
-                            continue
-                else:
-                    if processed_count > 0:
-                        print(f"Queue empty after processing {processed_count} items")
+                if not items:
+                    if processed_items:
                         break
-                    print("Queue empty, waiting 5 seconds")
-                    time.sleep(5)
+                    idle_polls += 1
+                    if idle_polls >= self.max_idle_polls:
+                        logger.info("Queue %s stayed empty", self.queue_name)
+                        break
+                    time.sleep(self.wait_time)
+                    continue
 
-                iteration_count += 1
+                idle_polls = 0
+                for item in items:
+                    try:
+                        processed_item = processor(item)
+                    except Exception:
+                        logger.exception("Dropping an item the processor rejected")
+                        continue
 
-            if iteration_count >= max_iterations:
-                print(f"Reached maximum iteration limit of {max_iterations}")
+                    if self.update_item(processed_item):
+                        processed_items.append(processed_item)
+            else:
+                logger.warning("Stopped at the %d iteration cap", self.max_iterations)
 
         except KeyboardInterrupt:
-            print("Stopping queue processing")
-        finally:
-            self.close()
+            logger.info("Stopping queue processing")
 
+        logger.info("Processed %d items from %s", len(processed_items), self.queue_name)
         return processed_items
 
     def close(self) -> None:
         """Close connections to Redis."""
         if self.redis_client:
             self.redis_client.close()
-            print("Redis connection closed")
+            logger.info("Redis connection closed")

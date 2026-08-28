@@ -5,11 +5,16 @@ and store web content based on user queries.
 """
 
 import os
+import sys
 import uuid
 import logging
 import requests
 from flask import Flask, render_template, request, jsonify, abort
 from werkzeug.exceptions import HTTPException
+
+root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(root_dir)
+from util.url_util import UrlNotAllowed, assert_fetchable
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +27,7 @@ SCORER_SERVICE_URL = os.getenv("SCORER_SERVICE_URL", "http://scorer:5000")
 DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db_processor:5000")
 
 SERVICE_TIMEOUT = int(os.getenv("SERVICE_TIMEOUT", "10"))
+PIPELINE_TIMEOUT = int(os.getenv("PIPELINE_TIMEOUT", "180"))
 
 
 def sort_links(data: dict):
@@ -75,9 +81,11 @@ def create_error_response(error: Exception, status_code: int = 500):
 def make_service_request(
     service_url: str,
     endpoint: str,
+    *,
     json: dict = None,
     method: str = "POST",
     params: dict = None,
+    timeout: int = SERVICE_TIMEOUT,
 ):
     """Make a standardized request to a service
 
@@ -87,6 +95,7 @@ def make_service_request(
         json (dict, optional): JSON data to send in request body
         method (str, optional): HTTP method to use. Defaults to "POST"
         params (dict, optional): Query parameters to include in URL
+        timeout (int, optional): Seconds to wait for the service to answer
 
     Returns:
         dict: Response data if successful
@@ -96,7 +105,7 @@ def make_service_request(
     """
     url = f"{service_url}/{endpoint.lstrip('/')}"
     response = requests.request(
-        method=method, url=url, json=json, params=params, timeout=SERVICE_TIMEOUT
+        method=method, url=url, json=json, params=params, timeout=timeout
     )
 
     # Get the response data even if status code is not 200
@@ -143,21 +152,47 @@ def scrape():
         tuple: JSON response containing scraped results and HTTP status code
     """
     logger.info("Received scrape request")
-    try:
-        data = request.json
-        url = data.get("url")
-        keyword = data.get("keyword")
-        job_id = str(uuid.uuid4())
+    data = request.get_json(silent=True) or {}
+    url = data.get("url")
+    keyword = data.get("keyword")
 
+    if not url or not keyword:
+        return (
+            jsonify(
+                {
+                    "error": "missing_parameter",
+                    "message": "Both url and keyword are required.",
+                    "status": "error",
+                }
+            ),
+            400,
+        )
+
+    try:
+        url = assert_fetchable(url)
+    except UrlNotAllowed as error:
+        logger.warning("Rejected scrape of %s: %s", url, error)
+        return (
+            jsonify({"error": "invalid_url", "message": str(error), "status": "error"}),
+            400,
+        )
+
+    job_id = str(uuid.uuid4())
+
+    try:
         # Call all services in sequence
         make_service_request(
             PRODUCER_SERVICE_URL,
             "scrape",
             json={"url": url, "keyword": keyword, "job_id": job_id},
+            timeout=PIPELINE_TIMEOUT,
         )
-        make_service_request(SCORER_SERVICE_URL, "process")
+        make_service_request(SCORER_SERVICE_URL, "process", timeout=PIPELINE_TIMEOUT)
         db_data = make_service_request(
-            DB_SERVICE_URL, "process", json={"job_id": job_id}
+            DB_SERVICE_URL,
+            "process",
+            json={"job_id": job_id},
+            timeout=PIPELINE_TIMEOUT,
         )
 
         # Use a dictionary to track unique URLs and keep the highest score for duplicates

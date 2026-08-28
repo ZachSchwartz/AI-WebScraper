@@ -3,18 +3,17 @@ Relevance processor using sentence transformers for fast text analysis and relev
 with improved caching to prevent repeated downloads.
 """
 
-import sys
 import os
 import hashlib
-import torch
-import numpy as np
+import logging
 from typing import Dict, Any, List
 from urllib.parse import urlparse, urljoin
+import torch
+import numpy as np
 from sentence_transformers import SentenceTransformer, util
 
-root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(root_dir)
-from util.error_util import format_error
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class ScorerProcessor:
@@ -32,7 +31,7 @@ class ScorerProcessor:
             os.environ.get("MODEL_CACHE_DIR", "/app/model_cache")
         )
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Using device: {self.device}")
+        logger.info("Using device: %s", self.device)
 
         # Create cache directory if it doesn't exist
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -42,10 +41,10 @@ class ScorerProcessor:
         os.makedirs(self.embeddings_cache_dir, exist_ok=True)
 
         # Load the model
-        print(f"Loading sentence transformer model: {self.model_name}")
+        logger.info("Loading sentence transformer model: %s", self.model_name)
         self.model = SentenceTransformer(self.model_name, cache_folder=self.cache_dir)
         self.model.to(self.device)
-        print("Model loaded successfully")
+        logger.info("Model loaded successfully")
 
         # Dictionary to cache embeddings in memory
         self.embedding_cache = {}
@@ -69,8 +68,10 @@ class ScorerProcessor:
                 # Store in memory cache
                 self.embedding_cache[embedding_key] = embedding
                 return embedding
-            except Exception as e:
-                format_error("embedding_load_error", str(e))
+            except (OSError, ValueError):
+                logger.warning(
+                    "Ignoring unreadable cached embedding %s", embedding_file
+                )
 
         # Generate new embedding
         embedding = self.model.encode(text, convert_to_numpy=True)
@@ -78,8 +79,8 @@ class ScorerProcessor:
         # Save to file cache
         try:
             np.save(embedding_file, embedding)
-        except Exception as e:
-            format_error("embedding_save_error", str(e))
+        except OSError:
+            logger.warning("Could not cache an embedding to %s", embedding_file)
 
         # Store in memory cache
         self.embedding_cache[embedding_key] = embedding
@@ -170,8 +171,8 @@ class ScorerProcessor:
                 components.extend(path_parts)
 
             return components
-        except Exception as e:
-            format_error("url_parse_error", str(e), url)
+        except ValueError:
+            logger.warning("Could not parse the URL %s", url)
             return [url]  # Fallback to original URL if parsing fails
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
@@ -204,10 +205,9 @@ class ScorerProcessor:
                 "score": score,
             }
 
-            # return processed_item
             return processed_item
 
-        except Exception as e:
-            format_error("processing_error", str(e))
+        except Exception:
+            logger.exception("Could not score an item; leaving it unscored")
             # Return original item if processing fails
             return item

@@ -14,13 +14,11 @@ COPY producer/requirements.txt /app/
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
 
-# Copy queue_util.py from root directory
-COPY util/queue_util.py /app/
-COPY util/error_util.py /app/
-COPY util/url_util.py /app/
+# The service and the shared utilities it imports, so the image runs on its own
+# rather than depending on a bind mount from docker-compose.
+COPY util/ /app/util/
+COPY producer/src/ /app/src/
 
-# Set Python path to include app directory
 ENV PYTHONPATH=/app
 
-# Note: Source code will be mounted as a volume in docker-compose.yml
-# CMD is set in docker-compose or when running the container
+CMD ["python", "src/producer_main.py"]

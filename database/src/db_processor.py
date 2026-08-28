@@ -1,9 +1,17 @@
+"""
+Database persistence for scored items taken off the Redis queue.
+"""
+
+import logging
 import os
-import traceback
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 import sqlalchemy as sa
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import QueuePool
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Create SQLAlchemy base
 Base = declarative_base()
@@ -24,18 +32,20 @@ class ScrapedItem(Base):
     raw_data = sa.Column(sa.JSON, nullable=True)
 
     def __repr__(self):
-        return f"<ScrapedItem(id={self.id}, url='{self.url}', relevance_score={self.relevance_score})>"
+        return (
+            f"<ScrapedItem(id={self.id}, href_url='{self.href_url}', "
+            f"relevance_score={self.relevance_score})>"
+        )
 
 
 class DatabaseProcessor:
     """Processes items from Redis queue and stores them in SQL database."""
 
     _engine = None
-    _session = None
 
     @classmethod
-    def get_engine(cls):
-        """Get or create the SQLAlchemy engine with connection pooling."""
+    def get_engine(cls) -> sa.Engine:
+        """Get or create the shared Postgres engine with connection pooling."""
         if cls._engine is None:
             # Get database connection details from environment variables
             db_user = os.getenv("DB_USER", "postgres")
@@ -61,22 +71,24 @@ class DatabaseProcessor:
                 connect_args={"application_name": "scraper"},
             )
 
-            # Create session factory
-            cls._session = sessionmaker(bind=cls._engine)
-
-            print(f"DatabaseProcessor initialized with connection to {db_host}")
+            logger.info("DatabaseProcessor connected to %s", db_host)
 
         return cls._engine
 
-    def __init__(self):
-        """Initialize the database processor."""
-        self.engine = self.get_engine()
-        self.session = self._session
+    def __init__(self, engine: Optional[sa.Engine] = None):
+        """Initialize the database processor.
+
+        Args:
+            engine: Engine to bind sessions to. Defaults to the pooled Postgres
+                engine; tests bind a throwaway one instead.
+        """
+        self.engine = engine if engine is not None else self.get_engine()
+        self.session = sessionmaker(bind=self.engine)
 
     def check_existing_item(
         self, session, keyword: str, source_url: str, href_url: str
-    ) -> bool:
-        """Checks if processed item already exists in database and deletes it if it does."""
+    ) -> None:
+        """Delete the row a rescrape of this link is about to replace."""
         existing_item = (
             session.query(ScrapedItem)
             .filter(
@@ -88,60 +100,52 @@ class DatabaseProcessor:
         )
 
         if existing_item:
-            print(f"Found existing item with ID {existing_item.id}, deleting...")
+            logger.info("Replacing existing item %d", existing_item.id)
             session.delete(existing_item)
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process an item from the Redis queue and store it in the database.
-        If an item with the same keyword, source_url, and href_url exists, it will be replaced.
+        Store one scored item from the Redis queue in the database.
 
         Args:
             item: Dictionary containing processed data from the scorer
 
         Returns:
             The original item, for compatibility with queue_util
+
+        Raises:
+            ValueError: if the scorer left no analysis to store.
+            SQLAlchemyError: if the row cannot be written.
+
+            Either way the caller drops the item rather than reporting an
+            unstored link back to the user as a result.
         """
+        relevance_analysis = item.get("relevance_analysis", {})
+        if not relevance_analysis.get("source_url"):
+            raise ValueError("Item carries no scored link to store")
+
+        db_item = ScrapedItem(
+            keyword=relevance_analysis.get("keyword"),
+            source_url=relevance_analysis.get("source_url"),
+            href_url=relevance_analysis.get("href_url"),
+            relevance_score=relevance_analysis.get("score"),
+            job_id=item.get("job_id"),
+            raw_data=item,
+        )
+
+        session = self.session()
         try:
-            print("\nProcessing item from Redis queue:")
-            print(f"Item keys: {list(item.keys())}")
-            relevance_analysis = item.get("relevance_analysis", {})
-
-            # Extract data from item
-            keyword = relevance_analysis.get("keyword", "")
-            source_url = relevance_analysis.get("source_url", "")
-            href_url = relevance_analysis.get("href_url", "")
-            score = relevance_analysis.get("score", "")
-
-            # Create new database item
-            db_item = ScrapedItem(
-                keyword=keyword,
-                source_url=source_url,
-                href_url=href_url,
-                relevance_score=score,
-                job_id=item.get("job_id"),
-                raw_data=item,
+            self.check_existing_item(
+                session, db_item.keyword, db_item.source_url, db_item.href_url
             )
+            session.add(db_item)
+            session.commit()
+            logger.debug("Stored %r", db_item)
+        except SQLAlchemyError:
+            session.rollback()
+            logger.exception("Failed to store %s", relevance_analysis.get("href_url"))
+            raise
+        finally:
+            session.close()
 
-            # Save to database
-            session = self.session()
-            try:
-                print("\nAttempting to save to database...")
-                self.check_existing_item(session, keyword, source_url, href_url)
-                session.add(db_item)
-                session.commit()
-                print(f"Database item: {db_item}")
-            except Exception as e:
-                session.rollback()
-                print(f"Error saving item to database: {str(e)}")
-                print(f"Error type: {type(e)}")
-
-                print(f"Traceback: {traceback.format_exc()}")
-            finally:
-                session.close()
-
-            return item  # Return the original item for compatibility
-
-        except Exception as e:
-            print(f"Error processing item: {str(e)}")
-            return item
+        return item

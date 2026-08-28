@@ -142,3 +142,81 @@ def test_db_query_returns_service_unavailable_when_the_db_service_is_down(
 
     assert response.status_code == 503
     assert response.json["status"] == "error"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"url": "https://example.com"},
+        {"keyword": "harness"},
+        {"url": "", "keyword": "harness"},
+    ],
+)
+def test_scrape_endpoint_rejects_an_incomplete_request(client, body, monkeypatch):
+    monkeypatch.setattr(
+        web_app, "make_service_request", lambda *a, **k: pytest.fail("called a service")
+    )
+
+    response = client.post("/api/scrape", json=body)
+
+    assert response.status_code == 400
+    assert response.json["error"] == "missing_parameter"
+
+
+def test_scrape_endpoint_rejects_a_request_with_no_body(client):
+    assert client.post("/api/scrape").status_code == 400
+
+
+@pytest.mark.parametrize(
+    "url, address",
+    [
+        ("http://169.254.169.254/latest/meta-data/", "169.254.169.254"),
+        ("http://postgres:5432/", "172.18.0.2"),
+        ("http://localhost:6379/", "127.0.0.1"),
+    ],
+)
+def test_scrape_endpoint_refuses_to_reach_into_the_private_network(
+    client, url, address, resolves_to, monkeypatch
+):
+    monkeypatch.setattr(
+        web_app, "make_service_request", lambda *a, **k: pytest.fail("called a service")
+    )
+    resolves_to(address)
+
+    response = client.post("/api/scrape", json={"url": url, "keyword": "harness"})
+
+    assert response.status_code == 400
+    assert response.json["error"] == "invalid_url"
+
+
+def test_the_pipeline_gets_a_longer_budget_than_a_database_query(client, monkeypatch):
+    timeouts = []
+
+    def record_timeout(service_url, endpoint, **kwargs):
+        timeouts.append(kwargs.get("timeout"))
+        return {"message": []}
+
+    monkeypatch.setattr(web_app, "make_service_request", record_timeout)
+
+    client.post("/api/scrape", json={"url": "https://example.com", "keyword": "rope"})
+
+    assert timeouts == [web_app.PIPELINE_TIMEOUT] * 3
+    assert web_app.PIPELINE_TIMEOUT > web_app.SERVICE_TIMEOUT
+
+
+def test_the_scrape_is_forwarded_under_its_normalized_url(client, monkeypatch):
+    payloads = []
+
+    def record(service_url, endpoint, **kwargs):
+        payloads.append(kwargs.get("json"))
+        return {"message": []}
+
+    monkeypatch.setattr(web_app, "make_service_request", record)
+
+    response = client.post(
+        "/api/scrape", json={"url": "Example.COM/Guide", "keyword": "rope"}
+    )
+
+    assert payloads[0]["url"] == "https://example.com/Guide"
+    assert response.json["source_url"] == "https://example.com/Guide"

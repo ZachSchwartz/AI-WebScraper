@@ -9,5 +9,6 @@ werkzeug==3.1.8
 numpy==2.5.2
 sqlalchemy==2.0.44
 redis==5.0.1
+fakeredis==2.37.1  # In-process Redis so the queue tests need no server.
 black==26.5.1
 pylint==4.0.7
