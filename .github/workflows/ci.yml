@@ -26,6 +26,9 @@ jobs:
       - name: Lint
         run: pylint --disable=import-error database scorer producer util web_service tests
 
+      - name: Type check
+        run: mypy --ignore-missing-imports database scorer producer util web_service
+
       # pytest.ini enforces the coverage floor, so this fails on a drop as well
       # as on a broken test.
       - name: Test
@@ -40,3 +43,9 @@ jobs:
       # deployment failure rather than a missing bind mount at run time.
       - name: Build the service images
         run: docker compose build producer db_processor web
+
+      - name: Import each service entry point
+        run: |
+          docker compose run --rm --no-deps producer python -c "import sys; sys.path.insert(0, 'src'); import producer_main"
+          docker compose run --rm --no-deps db_processor python -c "import sys; sys.path.insert(0, 'src'); import db_main"
+          docker compose run --rm --no-deps web python -c "import sys; sys.path.insert(0, 'src'); import app"

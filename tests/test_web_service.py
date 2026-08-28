@@ -80,6 +80,24 @@ def test_scrape_endpoint_calls_each_service_and_ranks_results(client, monkeypatc
     ]
 
 
+def test_every_stage_is_told_which_job_it_is_working_on(client, monkeypatch):
+    """Each stage drains its own job's queue, so all three need the id."""
+    jobs = []
+
+    def fake_request(service_url, endpoint, **kwargs):
+        jobs.append((kwargs.get("json") or {}).get("job_id"))
+        return {"message": []}
+
+    monkeypatch.setattr(web_app, "make_service_request", fake_request)
+
+    response = client.post(
+        "/api/scrape", json={"url": "https://example.com", "keyword": "harness"}
+    )
+
+    job_id = response.json["job_id"]
+    assert jobs == [job_id, job_id, job_id]
+
+
 def test_scrape_endpoint_tags_the_producer_and_db_calls_with_one_job_id(
     client, monkeypatch
 ):
@@ -220,3 +238,12 @@ def test_the_scrape_is_forwarded_under_its_normalized_url(client, monkeypatch):
 
     assert payloads[0]["url"] == "https://example.com/Guide"
     assert response.json["source_url"] == "https://example.com/Guide"
+
+
+def test_health_reports_the_service_is_up(client):
+    """The web service answers for its own liveness, holding no queue of its own."""
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json["status"] == "healthy"
+    assert response.json["service"] == "web_service"

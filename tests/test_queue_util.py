@@ -3,7 +3,7 @@
 # pylint: disable=missing-function-docstring,redefined-outer-name,unused-argument
 
 import json
-from util.queue_util import QueueManager
+from util.queue_util import QUEUE_TTL_SECONDS, QueueManager, scoped_queue_name
 
 
 def publish_all(manager, items):
@@ -101,3 +101,43 @@ def test_get_redis_config_reads_the_environment(monkeypatch):
 
 def test_the_processed_queue_is_named_after_the_source_queue(queue_manager):
     assert queue_manager.processed_queue_name == "scraped_items_processed"
+
+
+def test_a_job_gets_queue_keys_of_its_own(queue_manager):
+    scoped = QueueManager({"queue_name": "scraped_items", "job_id": "job-1"})
+
+    assert scoped.queue_name == "scraped_items:job-1"
+    assert scoped.processed_queue_name == "scraped_items_processed:job-1"
+
+
+def test_two_jobs_do_not_read_each_others_items(queue_manager):
+    first = QueueManager({"queue_name": "scraped_items", "job_id": "job-1"})
+    second = QueueManager({"queue_name": "scraped_items", "job_id": "job-2"})
+
+    first.publish_item({"href": "/first"})
+    second.publish_item({"href": "/second"})
+
+    assert first.get_item() == {"href": "/first"}
+    assert first.get_item() is None
+    assert second.get_item() == {"href": "/second"}
+
+
+def test_a_caller_with_no_job_keeps_the_shared_key():
+    assert scoped_queue_name("scraped_items", None) == "scraped_items"
+
+
+def test_a_published_key_expires_so_an_abandoned_job_clears_itself(queue_manager):
+    queue_manager.publish_item({"href": "/a"})
+
+    ttl = queue_manager.redis_client.ttl(queue_manager.queue_name)
+
+    assert 0 < ttl <= QUEUE_TTL_SECONDS
+
+
+def test_the_last_stage_stores_its_items_without_forwarding_them(queue_manager):
+    publish_all(queue_manager, [{"href": "/a"}])
+
+    processed = queue_manager.process_queue(lambda item: item, forward=False)
+
+    assert processed == [{"href": "/a"}]
+    assert read_processed(queue_manager) == []

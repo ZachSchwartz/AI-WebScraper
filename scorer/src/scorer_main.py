@@ -2,13 +2,9 @@
 Main entry point for the scorer processor.
 """
 
-import os
-import sys
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from scorer_processor import ScorerProcessor
 
-root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(root_dir)
 from util.queue_util import QueueManager
 from util.error_util import format_error
 from util.health_util import perform_health_check
@@ -21,13 +17,16 @@ processor = ScorerProcessor()
 @app.route("/health", methods=["GET"])
 def health_check():
     """Report whether this service can reach the queue."""
-    return perform_health_check("scorer_processor")
+    return perform_health_check("scorer_processor", QueueManager.check_connection)
 
 
 @app.route("/process", methods=["POST"])
 def process_endpoint():
     """API endpoint to trigger queue processing."""
-    queue_util = QueueManager(QueueManager.get_redis_config(wait_time=10))
+    job_id = (request.get_json(silent=True) or {}).get("job_id")
+    queue_util = QueueManager(
+        QueueManager.get_redis_config(wait_time=10, job_id=job_id)
+    )
     try:
         return jsonify({"message": queue_util.process_queue(processor.process_item)})
     except Exception as e:

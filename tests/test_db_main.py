@@ -8,6 +8,7 @@ import db_main
 import pytest
 import sqlalchemy as sa
 from db_processor import Base, DatabaseProcessor
+from util.queue_util import scoped_queue_name
 
 STORED = [
     {
@@ -116,10 +117,11 @@ def test_query_by_href_reports_a_link_it_has_never_seen(client):
     assert response.json["error"] == "href_not_found"
 
 
-def queue(queue_manager, *items):
-    """Put items on the processed queue the database service reads."""
+def queue(queue_manager, job_id, *items):
+    """Put items on the processed queue one job's database pass reads."""
+    key = scoped_queue_name("scraped_items_processed", job_id)
     for item in items:
-        queue_manager.redis_client.lpush("scraped_items_processed", json.dumps(item))
+        queue_manager.redis_client.lpush(key, json.dumps(item))
 
 
 @pytest.fixture
@@ -129,14 +131,11 @@ def process_client(processor):
     return db_main.app.test_client()
 
 
-def test_process_stores_the_queue_and_reports_only_this_job(
+def test_process_stores_only_the_queue_belonging_to_this_job(
     process_client, queue_manager, scored
 ):
-    queue(
-        queue_manager,
-        scored("https://example.com/a"),
-        scored("https://example.com/b", job_id="job-2"),
-    )
+    queue(queue_manager, "job-1", scored("https://example.com/a"))
+    queue(queue_manager, "job-2", scored("https://example.com/b", job_id="job-2"))
 
     response = process_client.post("/process", json={"job_id": "job-1"})
 
@@ -144,14 +143,30 @@ def test_process_stores_the_queue_and_reports_only_this_job(
     assert [
         item["relevance_analysis"]["href_url"] for item in response.json["message"]
     ] == ["https://example.com/a"]
+    assert (
+        queue_manager.redis_client.llen(
+            scoped_queue_name("scraped_items_processed", "job-2")
+        )
+        == 1
+    )
 
 
 def test_process_does_not_report_a_link_it_could_not_store(
     process_client, queue_manager
 ):
-    queue(queue_manager, {"job_id": "job-1", "relevance_analysis": {}})
+    queue(queue_manager, "job-1", {"job_id": "job-1", "relevance_analysis": {}})
 
     response = process_client.post("/process", json={"job_id": "job-1"})
 
     assert response.status_code == 200
     assert response.json["message"] == []
+
+
+def test_process_leaves_nothing_on_a_queue_behind_it(
+    process_client, queue_manager, scored
+):
+    queue(queue_manager, "job-1", scored("https://example.com/a"))
+
+    process_client.post("/process", json={"job_id": "job-1"})
+
+    assert queue_manager.redis_client.keys("*") == []

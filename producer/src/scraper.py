@@ -2,19 +2,15 @@
 Web scraper module for collecting data from target websites.
 """
 
-import sys
-import os
 import time
 import re
 import logging
-from typing import Dict, List, Any, Optional, Set
+from typing import Dict, List, Any, Optional, Sequence, Set, Union
 from urllib.robotparser import RobotFileParser
 from urllib.parse import urlparse, urljoin
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
-root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(root_dir)
 from util.error_util import format_error
 from util.url_util import UrlNotAllowed, assert_fetchable
 
@@ -117,10 +113,16 @@ def fetch_with_requests(
     return None
 
 
-def clean_text(text: str) -> Optional[str]:
-    """Clean and normalize text content."""
+def clean_text(text: Union[str, Sequence[str], None]) -> Optional[str]:
+    """Clean and normalize text content.
+
+    A multi-valued attribute such as rel reaches this as a list of its values,
+    so join those back into the one string the rest of the pipeline expects.
+    """
     if not text:
         return None
+    if not isinstance(text, str):
+        text = " ".join(text)
     text = text.strip()
 
     # Filter out common unwanted messages
@@ -192,9 +194,9 @@ def extract_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
     return metadata
 
 
-def extract_context(link: BeautifulSoup) -> Dict[str, Any]:
+def extract_context(link: Tag) -> Dict[str, Any]:
     """Extract and clean surrounding context for a link."""
-    context = {}
+    context: Dict[str, Any] = {}
     try:
         # Get previous text
         prev_elem = link.find_previous(["p", "h1", "h2", "h3", "li"])
@@ -217,7 +219,7 @@ def extract_context(link: BeautifulSoup) -> Dict[str, Any]:
     return context
 
 
-def process_link_attributes(link: BeautifulSoup) -> Dict[str, Any]:
+def process_link_attributes(link: Tag) -> Dict[str, Any]:
     """Process and clean link attributes."""
     href = link.get("href")
     text = clean_text(link.get_text())
@@ -225,12 +227,9 @@ def process_link_attributes(link: BeautifulSoup) -> Dict[str, Any]:
     aria_label = clean_text(link.get("aria-label"))
 
     # Process rel attribute
-    rel = link.get("rel")
-    if rel:
-        if isinstance(rel, list):
-            rel = " ".join(rel)
-        if rel.lower() in ["nofollow", "noopener"]:
-            rel = None
+    rel = clean_text(link.get("rel"))
+    if rel and rel.lower() in ["nofollow", "noopener"]:
+        rel = None
 
     return {
         "href": href,
@@ -306,7 +305,7 @@ def create_link_data(
 
 def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Parse HTML content to extract links and context."""
-    results = []
+    results: List[Dict[str, Any]] = []
 
     if not html or not isinstance(html, str):
         logger.error("Invalid HTML content received")
@@ -322,7 +321,7 @@ def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, An
         container_selector = target_config.get("container_selector", "body")
         containers = soup.select(container_selector) if container_selector else [soup]
 
-        processed_domains = set()
+        processed_domains: Set[str] = set()
         keyword = target_config.get("keyword", "")
 
         for container in containers:

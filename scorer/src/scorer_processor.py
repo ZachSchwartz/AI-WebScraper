@@ -6,8 +6,8 @@ with improved caching to prevent repeated downloads.
 import os
 import hashlib
 import logging
-from typing import Dict, Any, List
-from urllib.parse import urlparse, urljoin
+from typing import Dict, Any
+from urllib.parse import urljoin
 import torch
 import numpy as np
 from sentence_transformers import SentenceTransformer, util
@@ -145,35 +145,6 @@ class ScorerProcessor:
         score = 1 / (1 + np.exp(-10 * (score - 0.6)))
 
         return score
-
-    def _parse_url(self, url: str) -> List[str]:
-        """
-        Parse a URL into meaningful components.
-
-        Args:
-            url: The URL to parse
-
-        Returns:
-            List of meaningful URL components
-        """
-        try:
-            parsed = urlparse(url)
-            components = []
-
-            # Add domain parts
-            if parsed.netloc:
-                domain_parts = parsed.netloc.split(".")
-                components.extend(domain_parts)
-
-            # Add path parts, filtering out empty strings
-            if parsed.path:
-                path_parts = [part for part in parsed.path.split("/") if part]
-                components.extend(path_parts)
-
-            return components
-        except ValueError:
-            logger.warning("Could not parse the URL %s", url)
-            return [url]  # Fallback to original URL if parsing fails
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """

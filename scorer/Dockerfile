@@ -3,6 +3,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+RUN useradd --create-home --no-log-init app
+
 # curl is needed by the healthcheck; every Python dependency ships a wheel,
 # so no compiler toolchain is required.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,6 +22,8 @@ COPY scorer/src/ /app/src/
 ENV PYTHONPATH=/app
 
 ENV MODEL_CACHE_DIR=/app/model_cache
-RUN mkdir -p /app/model_cache
+RUN mkdir -p /app/model_cache && chown app:app /app/model_cache
+
+USER app
 
 CMD ["python", "src/scorer_main.py"]

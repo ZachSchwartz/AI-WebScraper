@@ -40,11 +40,11 @@ flowchart LR
     Browser -->|"POST /api/scrape"| Web
     Web -->|"step 1: /scrape"| Producer
     Producer -->|"fetch page, extract links"| Site
-    Producer -->|"publish to scraped_items"| Redis
-    Web -->|"step 2: /process"| Scorer
+    Producer -->|"publish to scraped_items:job_id"| Redis
+    Web -->|"step 2: /process with job_id"| Scorer
     Scorer -->|"drain, score, republish"| Redis
     Web -->|"step 3: /process with job_id"| DBSvc
-    DBSvc -->|"drain scraped_items_processed"| Redis
+    DBSvc -->|"drain scraped_items_processed:job_id"| Redis
     DBSvc -->|"store rows"| Postgres
 
     Browser -->|"GET /db/query"| Web
@@ -55,6 +55,12 @@ flowchart LR
 The web service holds the browser's request open while it drives all three steps in
 order; the numbered calls above happen one after another within a single
 `POST /api/scrape`. See [Known Limitations](#known-limitations) for what that costs.
+
+Every scrape gets a `job_id`, and each stage reads and writes queue keys scoped to
+it — `scraped_items:<job_id>` and `scraped_items_processed:<job_id>`. Two scrapes
+running at once therefore cannot consume each other's links. The keys carry an
+expiry, refreshed on every push, so a job that fails partway does not leave its
+items in Redis for good.
 
 
 ## Setup Instructions
@@ -110,9 +116,10 @@ pip install -r requirements-dev.txt
 pytest
 black --check database scorer producer util web_service tests
 pylint --disable=import-error database scorer producer util web_service tests
+mypy --ignore-missing-imports database scorer producer util web_service
 ```
 
-`pytest` reports coverage and fails below 80%; the thresholds live in `pytest.ini`. Redis is stubbed in process with `fakeredis` and the database tests run against SQLite, so no service needs to be up.
+`pytest` reports coverage and fails below 80%; the thresholds live in `pytest.ini`. The annotations are checked rather than decorative, so `mypy` gates a merge alongside the tests. Redis is stubbed in process with `fakeredis` and the database tests run against SQLite, so no service needs to be up.
 
 The scorer service imports `torch` and `sentence-transformers` at module level, which together weigh over a gigabyte. Rather than install them to test scoring, `tests/conftest.py` substitutes a deterministic stand-in that embeds text as a hashed bag of words, so cosine similarity still rises with shared vocabulary and the scoring logic is exercised in full.
 
@@ -193,8 +200,6 @@ If you wish to access the database to perform your own queries, or check out the
 Worth knowing before reading the code, and the shortest path to fixing each.
 
 **The pipeline is orchestrated synchronously.** `web_service` calls the producer, then the scorer, then the database service in sequence, holding the HTTP request open for the whole run (`PIPELINE_TIMEOUT`, 180s by default). The Redis queues decouple the *services* but not the *request*, so the queue does less work than the architecture suggests. The fix is a job-status endpoint: `/api/scrape` returns its `job_id` immediately, workers drain the queues on their own schedule, and the page polls for results. Celery or RQ would cover it.
-
-**Concurrent scrapes interleave.** The scorer's `/process` drains the whole queue rather than one job's items. If two scrapes overlap, the first request's scorer pass can consume the second's links. Rows are still stored under the correct `job_id`, but the second request can return zero results for work that did complete. Scoping each drain to a job, or giving each job its own queue key, closes this.
 
 **One page per scrape.** `scrape()` reads `targets[0]` and ignores the rest of the list, and it does not follow the links it finds. There is no crawl depth and no per-domain rate limiting beyond `robots.txt`.
 

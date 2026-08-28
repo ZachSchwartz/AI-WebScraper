@@ -3,6 +3,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+RUN useradd --create-home --no-log-init app
+
 # curl is needed by the healthcheck; every Python dependency ships a wheel,
 # so no compiler toolchain is required.
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,5 +22,7 @@ COPY util/ /app/util/
 COPY database/src/ /app/src/
 
 ENV PYTHONPATH=/app
+
+USER app
 
 CMD ["python", "src/db_main.py"]

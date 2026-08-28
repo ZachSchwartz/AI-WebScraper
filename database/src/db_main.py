@@ -3,14 +3,9 @@ Main entry point for the database processor.
 Takes processed items from Redis queue and stores them in SQL database.
 """
 
-import os
-import sys
 from flask import Flask, request, jsonify
 from db_processor import DatabaseProcessor, ScrapedItem
 
-# Add root directory to path for importing queue_util
-root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(root_dir)
 from util.queue_util import QueueManager
 from util.health_util import perform_health_check
 from util.error_util import format_error
@@ -22,7 +17,7 @@ app = Flask(__name__)
 @app.route("/health", methods=["GET"])
 def health_check():
     """Report whether this service can reach the queue."""
-    return perform_health_check("db_processor")
+    return perform_health_check("db_processor", QueueManager.check_connection)
 
 
 @app.route("/process", methods=["POST"])
@@ -31,20 +26,19 @@ def process_endpoint():
     try:
         job_id = (request.get_json(silent=True) or {}).get("job_id")
 
-        # Initialize Redis connection with processed queue
+        # Initialize Redis connection with this job's processed queue
         queue_util = QueueManager(
-            QueueManager.get_redis_config(queue_name="scraped_items_processed")
+            QueueManager.get_redis_config(
+                queue_name="scraped_items_processed", job_id=job_id
+            )
         )
 
         # Initialize database processor
         db_processor = DatabaseProcessor()
         try:
-            items = queue_util.process_queue(db_processor.process_item)
+            items = queue_util.process_queue(db_processor.process_item, forward=False)
         finally:
             queue_util.close()
-
-        if job_id:
-            items = [item for item in items if item.get("job_id") == job_id]
 
         return jsonify({"message": items})
     except Exception as e:
@@ -161,16 +155,5 @@ def query_by_href():
         return jsonify(format_error("db_query_error", str(e))), 500
 
 
-def main() -> None:
-    """Initialize and run the database processor."""
-    # Check if we're running in API mode (no arguments)
-    if len(sys.argv) == 1:
-        # Run as API server
-        app.run(host="0.0.0.0", port=5000)
-    else:
-        # Run as command line tool
-        process_endpoint()
-
-
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=5000)

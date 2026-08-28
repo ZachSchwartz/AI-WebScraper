@@ -3,22 +3,17 @@ Main entry point for the web scraper producer.
 """
 
 import copy
-import os
-import sys
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from flask import Flask, request, jsonify
 from scraper import scrape
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(root_dir)
 from util.queue_util import QueueManager
 from util.health_util import perform_health_check
 from util.error_util import format_error
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -26,7 +21,7 @@ app = Flask(__name__)
 @app.route("/health", methods=["GET"])
 def health_check():
     """Report whether this service can reach the queue."""
-    return perform_health_check("producer")
+    return perform_health_check("producer", QueueManager.check_connection)
 
 
 SCRAPER_CONFIG = {
@@ -61,7 +56,10 @@ SCRAPER_CONFIG = {
 
 
 def run_scraper(
-    queue_util: QueueManager, target_url: str, target_keyword: str, job_id: str = None
+    queue_util: QueueManager,
+    target_url: str,
+    target_keyword: str,
+    job_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Scrape one target and publish every link it found to the queue.
 
@@ -90,7 +88,9 @@ def run_scraper(
     return {"job_id": job_id, "url": target_url, "published": published}
 
 
-def _publish(queue_util: QueueManager, item: Dict[str, Any], job_id: str) -> bool:
+def _publish(
+    queue_util: QueueManager, item: Dict[str, Any], job_id: Optional[str]
+) -> bool:
     """Tag an item with its job and hand it to the queue."""
     item["job_id"] = job_id
     return queue_util.publish_item(item)
@@ -111,9 +111,10 @@ def scrape_endpoint():
             400,
         )
 
-    queue_util = QueueManager(QueueManager.get_redis_config())
+    job_id = data.get("job_id")
+    queue_util = QueueManager(QueueManager.get_redis_config(job_id=job_id))
     try:
-        result = run_scraper(queue_util, url, keyword, data.get("job_id"))
+        result = run_scraper(queue_util, url, keyword, job_id)
     finally:
         queue_util.close()
 

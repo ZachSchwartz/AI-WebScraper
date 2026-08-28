@@ -5,15 +5,14 @@ and store web content based on user queries.
 """
 
 import os
-import sys
 import uuid
 import logging
+from typing import Dict, Optional
 import requests
 from flask import Flask, render_template, request, jsonify, abort
 from werkzeug.exceptions import HTTPException
 
-root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(root_dir)
+from util.health_util import perform_health_check
 from util.url_util import UrlNotAllowed, assert_fetchable
 
 # Configure logging
@@ -32,7 +31,7 @@ PIPELINE_TIMEOUT = int(os.getenv("PIPELINE_TIMEOUT", "180"))
 
 def sort_links(data: dict):
     """Sorts links by relevance score and returns a list of dictionaries with url and score."""
-    url_score_map = {}
+    url_score_map: Dict[str, float] = {}
     if isinstance(data, dict) and isinstance(data.get("message"), list):
         for item in data["message"]:
             if isinstance(item, dict) and "relevance_analysis" in item:
@@ -44,10 +43,12 @@ def sort_links(data: dict):
                 if href_url not in url_score_map or score > url_score_map[href_url]:
                     url_score_map[href_url] = score
 
-    # Convert the unique URL map back to a list of dictionaries
-    links = [{"url": url, "score": score} for url, score in url_score_map.items()]
-    links.sort(key=lambda x: float(x["score"] or 0), reverse=True)
-    return links
+    return [
+        {"url": url, "score": score}
+        for url, score in sorted(
+            url_score_map.items(), key=lambda pair: pair[1], reverse=True
+        )
+    ]
 
 
 def create_error_response(error: Exception, status_code: int = 500):
@@ -82,9 +83,9 @@ def make_service_request(
     service_url: str,
     endpoint: str,
     *,
-    json: dict = None,
+    json: Optional[dict] = None,
     method: str = "POST",
-    params: dict = None,
+    params: Optional[dict] = None,
     timeout: int = SERVICE_TIMEOUT,
 ):
     """Make a standardized request to a service
@@ -133,6 +134,12 @@ def index():
         str: Rendered HTML template for the index page.
     """
     return render_template("index.html")
+
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Report whether this service is up."""
+    return perform_health_check("web_service")
 
 
 @app.route("/api/scrape", methods=["POST"])
@@ -187,7 +194,12 @@ def scrape():
             json={"url": url, "keyword": keyword, "job_id": job_id},
             timeout=PIPELINE_TIMEOUT,
         )
-        make_service_request(SCORER_SERVICE_URL, "process", timeout=PIPELINE_TIMEOUT)
+        make_service_request(
+            SCORER_SERVICE_URL,
+            "process",
+            json={"job_id": job_id},
+            timeout=PIPELINE_TIMEOUT,
+        )
         db_data = make_service_request(
             DB_SERVICE_URL,
             "process",

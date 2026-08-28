@@ -12,3 +12,4 @@ redis==5.0.1
 fakeredis==2.37.1  # In-process Redis so the queue tests need no server.
 black==26.5.1
 pylint==4.0.7
+mypy==2.3.1

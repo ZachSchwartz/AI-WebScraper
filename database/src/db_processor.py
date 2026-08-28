@@ -7,29 +7,29 @@ import os
 from typing import Any, Dict, Optional
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 from sqlalchemy.pool import QueuePool
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create SQLAlchemy base
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    """Declarative base for the models this service stores."""
 
 
-# Define ScrapedItem model
 class ScrapedItem(Base):
     """Model for storing scraped items in the database."""
 
     __tablename__ = "scraped_items"
 
-    id = sa.Column(sa.Integer, primary_key=True)
-    keyword = sa.Column(sa.String, nullable=True)
-    source_url = sa.Column(sa.String, nullable=False)
-    href_url = sa.Column(sa.String, nullable=True)
-    relevance_score = sa.Column(sa.Float, nullable=True)
-    job_id = sa.Column(sa.String, nullable=True)
-    raw_data = sa.Column(sa.JSON, nullable=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    keyword: Mapped[Optional[str]]
+    source_url: Mapped[str]
+    href_url: Mapped[Optional[str]]
+    relevance_score: Mapped[Optional[float]]
+    job_id: Mapped[Optional[str]]
+    raw_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(sa.JSON)
 
     def __repr__(self):
         return (
@@ -86,7 +86,11 @@ class DatabaseProcessor:
         self.session = sessionmaker(bind=self.engine)
 
     def check_existing_item(
-        self, session, keyword: str, source_url: str, href_url: str
+        self,
+        session,
+        keyword: Optional[str],
+        source_url: str,
+        href_url: Optional[str],
     ) -> None:
         """Delete the row a rescrape of this link is about to replace."""
         existing_item = (

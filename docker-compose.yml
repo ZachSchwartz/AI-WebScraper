@@ -57,7 +57,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
-      - SCORER_SERVICE_URL=http://scorer:5000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s
@@ -78,7 +77,6 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
-      - DB_SERVICE_URL=http://db_processor:5000
       - TRANSFORMERS_CACHE=/app/model_cache
       - HF_HOME=/app/model_cache
     volumes:
@@ -136,7 +134,7 @@ services:
       - SCORER_SERVICE_URL=http://scorer:5000
       - DB_SERVICE_URL=http://db_processor:5000
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
