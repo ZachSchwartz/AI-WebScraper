@@ -16,7 +16,6 @@ from util.url_util import UrlNotAllowed, assert_fetchable, normalize_url
         ("HTTPS://Example.COM/Path", "https://example.com/Path"),
         ("https://example.com/page#section", "https://example.com/page"),
         ("https://example.com/search?q=rope", "https://example.com/search?q=rope"),
-        # Not page locations; they must survive untouched.
         ("mailto:shop@example.com", "mailto:shop@example.com"),
         ("tel:15550100", "tel:15550100"),
     ],

@@ -91,7 +91,7 @@ class QueueManager:
 
         try:
             client = redis.Redis(host=host, port=port, decode_responses=True)
-            client.ping()  # Test connection
+            client.ping()
             logger.info("Connected to Redis at %s:%s", host, port)
             return client
         except redis.RedisError:

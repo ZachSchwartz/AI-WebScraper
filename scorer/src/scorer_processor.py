@@ -16,6 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 CONTEXT_WINDOW = 3
+MODEL_NAME = "all-MiniLM-L6-v2"
 
 
 def _sigmoid(value: float, steepness: float, midpoint: float = 0.0) -> float:
@@ -40,35 +41,27 @@ def context_windows(text_lower: str, keyword_lower: str) -> List[str]:
 class ScorerProcessor:
     """Processes text content using sentence transformers with proper caching."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Load the sentence transformer, caching it on a persistent volume.
+
+        The cache directory holds both the downloaded model and the embeddings
+        it produces, so a restart neither downloads nor re-encodes.
         """
-        Initialize the relevance processor with a sentence transformer model.
-        """
-        # Using a small, fast sentence transformer model
-        # all-MiniLM-L6-v2 is very fast and has good performance for semantic similarity
-        self.model_name = "all-MiniLM-L6-v2"
-        # Use a persistent volume mount path for model caching
         self.cache_dir = os.path.abspath(
             os.environ.get("MODEL_CACHE_DIR", "/app/model_cache")
         )
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         logger.info("Using device: %s", self.device)
 
-        # Create cache directory if it doesn't exist
-        os.makedirs(self.cache_dir, exist_ok=True)
-
-        # Create a directory for caching embeddings
         self.embeddings_cache_dir = os.path.join(self.cache_dir, "embeddings_cache")
         os.makedirs(self.embeddings_cache_dir, exist_ok=True)
 
-        # Load the model
-        logger.info("Loading sentence transformer model: %s", self.model_name)
-        self.model = SentenceTransformer(self.model_name, cache_folder=self.cache_dir)
+        logger.info("Loading sentence transformer model: %s", MODEL_NAME)
+        self.model = SentenceTransformer(MODEL_NAME, cache_folder=self.cache_dir)
         self.model.to(self.device)
         logger.info("Model loaded successfully")
 
-        # Dictionary to cache embeddings in memory
-        self.embedding_cache = {}
+        self.embedding_cache: Dict[str, np.ndarray] = {}
 
     def _get_embedding_key(self, text: str) -> str:
         """Generate a cache key for text embedding."""
@@ -134,12 +127,12 @@ class ScorerProcessor:
         return [embeddings[key] for key in keys]
 
     def generate_relevance_score(self, text: str, keyword: str) -> float:
-        """
-        Generate a relevance score between 0 and 1 for the text relative to the keyword.
-        Uses semantic analysis with sentence transformers and intelligent scoring.
+        """Score how relevant the text is to the keyword, between 0 and 1.
 
-        The strongest context wins, so a link that uses the keyword meaningfully
-        once is not diluted by the other places the same page repeats it.
+        An exact match carries the most weight, then similarity over the whole
+        text, then the best of the keyword's context windows. The strongest
+        context wins, so a link that uses the keyword meaningfully once is not
+        diluted by the other places the same page repeats it.
 
         Args:
             text: Text to analyze
@@ -148,35 +141,25 @@ class ScorerProcessor:
         Returns:
             Score between 0 and 1
         """
-        # Convert to lowercase for case-insensitive matching
         text_lower = text.lower()
         keyword_lower = keyword.lower()
-
-        # 1. Exact match bonus (highest weight)
         exact_match = 1.0 if keyword_lower in text_lower else 0.0
 
         contexts = context_windows(text_lower, keyword_lower) if exact_match else []
         embeddings = self._get_embeddings([text, keyword, *contexts])
-        text_embedding, keyword_embedding = embeddings[0], embeddings[1]
+        keyword_embedding = embeddings[1]
 
-        # 2. Semantic similarity using sentence transformer
-        semantic_score = _sigmoid(
-            util.cos_sim(text_embedding, keyword_embedding).item(), steepness=8
-        )
+        def similarity(embedding: np.ndarray) -> float:
+            return _sigmoid(
+                util.cos_sim(embedding, keyword_embedding).item(), steepness=8
+            )
 
-        # 3. Context analysis with increased weight for exact matches
+        semantic_score = similarity(embeddings[0])
         context_score = max(
-            (
-                _sigmoid(util.cos_sim(embedding, keyword_embedding).item(), steepness=8)
-                for embedding in embeddings[2:]
-            ),
-            default=0.0,
+            (similarity(embedding) for embedding in embeddings[2:]), default=0.0
         )
 
-        # Combine scores with polarized weighting
         score = 0.5 * exact_match + 0.3 * semantic_score + 0.2 * context_score
-
-        # Apply a sigmoid transformation
         return _sigmoid(score, steepness=10, midpoint=0.6)
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
@@ -190,17 +173,13 @@ class ScorerProcessor:
             Dictionary containing original data and processing results
         """
         try:
-            # Get the keyword and pre-processed text
             keyword = item.get("keyword", "").lower()
             processed_text = item.get("processed_text", "")
-
-            # Generate relevance score
             score = self.generate_relevance_score(processed_text, keyword)
 
             source_url = item.get("source_url", "")
             href = urljoin(source_url, item.get("href", ""))
 
-            # Add results to item
             processed_item = item.copy()
             processed_item["relevance_analysis"] = {
                 "keyword": keyword,
@@ -213,5 +192,4 @@ class ScorerProcessor:
 
         except Exception:
             logger.exception("Could not score an item; leaving it unscored")
-            # Return original item if processing fails
             return item

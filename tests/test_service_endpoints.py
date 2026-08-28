@@ -38,7 +38,6 @@ def test_process_scores_only_the_queue_belonging_to_this_job(client, queue_manag
 
     assert response.status_code == 200
     assert [item["href"] for item in response.json["message"]] == ["/a"]
-    # The concurrent scrape's links are still waiting for its own request.
     assert QueueManager({"job_id": "job-2"}).get_item()["href"] == "/b"
 
 

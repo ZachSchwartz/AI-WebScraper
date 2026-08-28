@@ -65,7 +65,6 @@ def test_process_item_resolves_relative_hrefs(scorer_processor):
             "https://example.com/reviews/harness-guide",
         ),
         ("https://example.com/", "#anchor", "https://example.com/#anchor"),
-        # Non-http schemes are not page-relative and must survive untouched.
         ("https://example.com/", "mailto:shop@example.com", "mailto:shop@example.com"),
         ("https://example.com/", "tel:15550100", "tel:15550100"),
     ],
@@ -125,7 +124,6 @@ def test_scoring_a_link_costs_a_single_pass_through_the_model(scorer_processor):
     )
 
     assert len(calls) == 1
-    # The text, the keyword, and a window around each standalone occurrence.
     assert len(calls[0]) == 4
 
 

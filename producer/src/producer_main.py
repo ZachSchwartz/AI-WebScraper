@@ -24,35 +24,7 @@ def health_check():
     return perform_health_check("producer", QueueManager.check_connection)
 
 
-SCRAPER_CONFIG = {
-    "targets": [
-        {
-            "url": "",
-            "keyword": "",
-            "container_selector": "body",  # Or a more specific container
-            "fields": {
-                "links": {
-                    "selector": "a",  # Target all <a> tags
-                    "extract": [
-                        "href",
-                        "text",
-                        "title",
-                        "aria-label",
-                        "rel",
-                    ],  # Extract link attributes
-                },
-                "context": {
-                    "selector": "p, h1, h2, h3, li",  # Extract surrounding text
-                    "extract": "text",
-                },
-                "metadata": {
-                    "selector": "meta",  # Extract meta tags (e.g., description, keywords)
-                    "extract": ["name", "content"],
-                },
-            },
-        }
-    ]
-}
+SCRAPER_CONFIG = {"targets": [{"url": "", "keyword": "", "container_selector": "body"}]}
 
 
 def run_scraper(
@@ -63,6 +35,9 @@ def run_scraper(
 ) -> Dict[str, Any]:
     """Scrape one target and publish every link it found to the queue.
 
+    The config template is module level and Flask serves requests concurrently,
+    so each job fills in a copy rather than overwriting the shared template.
+
     Returns:
         A summary of what was published, or a formatted error. A page with no
         links publishes nothing and is reported as a count of zero rather than
@@ -70,8 +45,6 @@ def run_scraper(
     """
     logger.info("Starting scraping job %s for %s", job_id, target_url)
 
-    # The config is module level and Flask serves requests concurrently, so each
-    # job fills in a copy rather than overwriting the shared template.
     config = copy.deepcopy(SCRAPER_CONFIG)
     config["targets"][0]["url"] = target_url
     config["targets"][0]["keyword"] = target_keyword

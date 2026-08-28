@@ -15,7 +15,6 @@ from werkzeug.exceptions import HTTPException
 from util.health_util import perform_health_check
 from util.url_util import UrlNotAllowed, assert_fetchable
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -39,7 +38,6 @@ def sort_links(data: dict):
                 href_url = analysis.get("href_url", "")
                 score = float(analysis.get("score", 0))
 
-                # Only keep the highest score for each URL
                 if href_url not in url_score_map or score > url_score_map[href_url]:
                     url_score_map[href_url] = score
 
@@ -118,7 +116,6 @@ def make_service_request(
         method=method, url=url, json=json, params=params, timeout=timeout
     )
 
-    # Get the response data even if status code is not 200
     try:
         data = response.json()
     except ValueError:
@@ -196,7 +193,6 @@ def scrape():
     job_id = str(uuid.uuid4())
 
     try:
-        # Call all services in sequence
         make_service_request(
             PRODUCER_SERVICE_URL,
             "scrape",
@@ -216,7 +212,6 @@ def scrape():
             timeout=PIPELINE_TIMEOUT,
         )
 
-        # Use a dictionary to track unique URLs and keep the highest score for duplicates
         links = sort_links(db_data)
 
         return jsonify(
@@ -255,30 +250,28 @@ def scrape():
         )
 
 
-@app.route("/db/query")
-def db_query():
-    """Proxy database queries to the DB service."""
+def proxy_to_db(endpoint: str):
+    """Pass the request's query parameters through to the database service."""
     try:
         return make_service_request(
-            DB_SERVICE_URL, "query", method="GET", params=request.args
+            DB_SERVICE_URL, endpoint, method="GET", params=request.args
         )
     except Exception as e:
         return create_error_response(
             e, 503 if isinstance(e, requests.exceptions.RequestException) else 500
         )
+
+
+@app.route("/db/query")
+def db_query():
+    """Proxy database queries to the DB service."""
+    return proxy_to_db("query")
 
 
 @app.route("/db/query/href")
 def db_query_href():
     """Proxy href URL queries to the DB service."""
-    try:
-        return make_service_request(
-            DB_SERVICE_URL, "query/href", method="GET", params=request.args
-        )
-    except Exception as e:
-        return create_error_response(
-            e, 503 if isinstance(e, requests.exceptions.RequestException) else 500
-        )
+    return proxy_to_db("query/href")
 
 
 if __name__ == "__main__":

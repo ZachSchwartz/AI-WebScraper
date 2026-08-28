@@ -29,7 +29,11 @@ class Base(DeclarativeBase):
 
 
 class ScrapedItem(Base):
-    """One link, scored against the keyword the page was scraped for."""
+    """One link, scored against the keyword the page was scraped for.
+
+    The unique constraint indexes the keyword as its leading column, which
+    serves a filter on the keyword alone; a second index would be dead weight.
+    """
 
     __tablename__ = "scraped_items"
     __table_args__ = (
@@ -37,8 +41,6 @@ class ScrapedItem(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # The unique constraint indexes this as its leading column, which serves a
-    # filter on the keyword alone; a second index on it would be dead weight.
     keyword: Mapped[str]
     source_url: Mapped[str] = mapped_column(index=True)
     href_url: Mapped[str] = mapped_column(index=True)
@@ -65,19 +67,16 @@ class DatabaseProcessor:
     def get_engine(cls) -> sa.Engine:
         """Get or create the shared Postgres engine with connection pooling."""
         if cls._engine is None:
-            # Get database connection details from environment variables
             db_user = os.getenv("DB_USER", "postgres")
             db_password = os.getenv("DB_PASSWORD", "postgres")
             db_host = os.getenv("DB_HOST", "postgres")
             db_port = os.getenv("DB_PORT", "5432")
             db_name = os.getenv("DB_NAME", "scraper")
 
-            # Create database URL
             db_url = (
                 f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
             )
 
-            # Create the SQLAlchemy engine with connection pooling
             cls._engine = sa.create_engine(
                 db_url,
                 poolclass=QueuePool,

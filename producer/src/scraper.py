@@ -14,16 +14,20 @@ from bs4 import BeautifulSoup, Tag
 from util.error_util import format_error
 from util.url_util import UrlNotAllowed, assert_fetchable
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 MAX_REDIRECTS = 5
-# The suffix labels this scraper meets often enough to be worth stripping. A
-# complete list is the Public Suffix List, which is a dependency this heuristic
-# does not earn.
 PUBLIC_SUFFIX_LABELS = {"com", "org", "net", "edu", "gov", "io", "co", "uk"}
+GENERIC_PATH_WORDS = {"index", "home", "page", "default"}
+UNINFORMATIVE_REL = {"nofollow", "noopener"}
+MIN_DESCRIPTION_LENGTH = 10
+MAX_DESCRIPTION_LENGTH = 300
+HEADING_TAGS = ["h1", "h2", "h3"]
+CONTEXT_TAGS = ["p", *HEADING_TAGS, "li"]
+DEFAULT_TIMEOUT = 30
+DEFAULT_RETRY_COUNT = 3
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -76,7 +80,7 @@ def fetch_page(url: str, headers: Dict[str, str], timeout: int) -> requests.Resp
 def fetch_with_requests(
     url: str, headers: Dict[str, str], timeout: int, retry_count: int
 ) -> Optional[Dict[str, Any]]:
-    """Fetch URL content using requests library with rate limiting."""
+    """Fetch URL content, backing off exponentially between failed attempts."""
     if not is_allowed_by_robots(url, headers["User-Agent"]):
         logger.info("Skipping %s (disallowed by robots.txt)", url)
         return format_error(
@@ -99,20 +103,15 @@ def fetch_with_requests(
             return format_error("url_not_allowed", str(e), url)
         except requests.exceptions.RequestException as e:
             logger.warning(
-                "Warning: Attempt %d/%d failed for %s: %s",
-                attempt + 1,
-                retry_count,
-                url,
-                str(e),
+                "Attempt %d/%d failed for %s: %s", attempt + 1, retry_count, url, e
             )
-            if attempt < retry_count - 1:
-                time.sleep(2**attempt)  # Exponential backoff
-            elif attempt == retry_count - 1:
-                return {
-                    "error": "request_failed",
-                    "message": f"Failed to fetch {url} after {retry_count} attempts: {str(e)}",
-                    "url": url,
-                }
+            if attempt == retry_count - 1:
+                return format_error(
+                    "request_failed",
+                    f"Failed to fetch {url} after {retry_count} attempts: {e}",
+                    url,
+                )
+            time.sleep(2**attempt)
 
     return None
 
@@ -128,13 +127,11 @@ def clean_text(text: Union[str, Sequence[str], None]) -> Optional[str]:
     if not isinstance(text, str):
         text = " ".join(text)
     text = text.strip()
+    text_lower = text.lower()
 
-    # Filter out common unwanted messages
-    if text.lower() in {"more information...", "click here", "read more"}:
+    if text_lower in {"more information...", "click here", "read more"}:
         return None
 
-    # Filter JavaScript warning messages with flexible matching
-    text_lower = text.lower()
     if any(
         phrase in text_lower
         for phrase in [
@@ -170,38 +167,35 @@ def registrable_name(netloc: str) -> Optional[str]:
 
 
 def process_url(url_str: str, processed_domains: Set[str]) -> List[str]:
-    """Process a URL and return meaningful components."""
+    """Reduce a URL to the domain and path words that carry meaning.
+
+    A domain already seen on this page contributes nothing the second time, so
+    the caller's set keeps it out of every later link's text.
+    """
     if not url_str:
         return []
 
     parsed = urlparse(url_str)
     components = []
 
-    # Process domain
     domain = registrable_name(parsed.netloc)
     if domain and domain not in processed_domains:
         components.append(domain)
         processed_domains.add(domain)
 
-    # Process path
-    if parsed.path:
-        path = parsed.path.strip("/")
-        if path:
-            # Split path into meaningful words, handling both slashes and hyphens
-            path_words = [word for word in re.split(r"[/-]", path) if word]
-            # Filter out common generic terms
-            path_words = [
-                word
-                for word in path_words
-                if word.lower() not in {"index", "home", "page", "default"}
-            ]
-            components.extend(path_words)
+    path = parsed.path.strip("/")
+    if path:
+        components.extend(
+            word
+            for word in re.split(r"[/-]", path)
+            if word and word.lower() not in GENERIC_PATH_WORDS
+        )
 
     return components
 
 
 def extract_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
-    """Extract and clean metadata from the page."""
+    """Extract the page title and description, dropping a stub description."""
     metadata = {}
     if soup.title:
         metadata["title"] = clean_text(soup.title.get_text())
@@ -209,9 +203,9 @@ def extract_metadata(soup: BeautifulSoup) -> Dict[str, Any]:
     meta_description = soup.find("meta", attrs={"name": "description"})
     if meta_description and meta_description.get("content"):
         desc = clean_text(meta_description.get("content"))
-        if desc and len(desc) > 10:  # Only add if it's not too short
-            if len(desc) > 300:  # Truncate very long descriptions
-                desc = desc[:300] + "..."
+        if desc and len(desc) > MIN_DESCRIPTION_LENGTH:
+            if len(desc) > MAX_DESCRIPTION_LENGTH:
+                desc = desc[:MAX_DESCRIPTION_LENGTH] + "..."
             metadata["description"] = desc
     return metadata
 
@@ -220,20 +214,15 @@ def extract_context(link: Tag) -> Dict[str, Any]:
     """Extract and clean surrounding context for a link."""
     context: Dict[str, Any] = {}
     try:
-        # Get previous text
-        prev_elem = link.find_previous(["p", "h1", "h2", "h3", "li"])
+        prev_elem = link.find_previous(CONTEXT_TAGS)
         if prev_elem:
             context["previous_text"] = clean_text(prev_elem.get_text())
 
-        # Get next text
-        next_elem = link.find_next(["p", "h1", "h2", "h3", "li"])
+        next_elem = link.find_next(CONTEXT_TAGS)
         if next_elem:
             context["next_text"] = clean_text(next_elem.get_text())
 
-        # Get heading hierarchy
-        headings = [
-            h.get_text(strip=True) for h in link.find_parents(["h1", "h2", "h3"])
-        ]
+        headings = [h.get_text(strip=True) for h in link.find_parents(HEADING_TAGS)]
         if headings:
             context["heading_hierarchy"] = headings
     except Exception as e:
@@ -248,9 +237,8 @@ def process_link_attributes(link: Tag) -> Dict[str, Any]:
     title = clean_text(link.get("title"))
     aria_label = clean_text(link.get("aria-label"))
 
-    # Process rel attribute
     rel = clean_text(link.get("rel"))
-    if rel and rel.lower() in ["nofollow", "noopener"]:
+    if rel and rel.lower() in UNINFORMATIVE_REL:
         rel = None
 
     return {
@@ -268,38 +256,21 @@ def collect_text_components(
     context: Dict[str, Any],
     url_components: List[str],
 ) -> List[str]:
-    """Collect and combine all text components for a link."""
-    text_parts = []
+    """Combine everything describing a link into one deduplicated list."""
+    text_parts = [
+        link_attrs["text"],
+        link_attrs["title"],
+        link_attrs["aria_label"],
+        link_attrs["rel"],
+        metadata.get("title"),
+        metadata.get("description"),
+        *url_components,
+        context.get("previous_text"),
+        context.get("next_text"),
+        *context.get("heading_hierarchy", []),
+    ]
 
-    # Add link attributes
-    if link_attrs["text"]:
-        text_parts.append(link_attrs["text"])
-    if link_attrs["title"]:
-        text_parts.append(link_attrs["title"])
-    if link_attrs["aria_label"]:
-        text_parts.append(link_attrs["aria_label"])
-    if link_attrs["rel"]:
-        text_parts.append(link_attrs["rel"])
-
-    # Add metadata
-    if metadata.get("title"):
-        text_parts.append(metadata["title"])
-    if metadata.get("description"):
-        text_parts.append(metadata["description"])
-
-    # Add URL components
-    text_parts.extend(url_components)
-
-    # Add context
-    if context.get("previous_text"):
-        text_parts.append(context["previous_text"])
-    if context.get("next_text"):
-        text_parts.append(context["next_text"])
-    if context.get("heading_hierarchy"):
-        text_parts.extend(context["heading_hierarchy"])
-
-    # Remove duplicates while preserving order
-    return list(dict.fromkeys(text_parts))
+    return list(dict.fromkeys(part for part in text_parts if part))
 
 
 def create_link_data(
@@ -335,7 +306,7 @@ def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, An
 
     try:
         soup = BeautifulSoup(html, "html.parser")
-        if not soup.find():  # Check if parsed content is empty
+        if not soup.find():
             logger.error("No parseable content found in HTML")
             return results
 
@@ -347,29 +318,21 @@ def parse_content(html: str, target_config: Dict[str, Any]) -> List[Dict[str, An
         keyword = target_config.get("keyword", "")
 
         for container in containers:
-            # Find all links in the container
             links = container.find_all("a")
             logger.info("Found %d links in container", len(links))
 
             for link in links:
                 try:
-                    # Process link attributes
                     link_attrs = process_link_attributes(link)
                     if not link_attrs["href"]:
                         continue
 
-                    # Extract context
                     context = extract_context(link)
-
-                    # Process URL components
                     url_components = process_url(link_attrs["href"], processed_domains)
-
-                    # Collect text components
                     text_components = collect_text_components(
                         link_attrs, metadata, context, url_components
                     )
 
-                    # Create link data
                     link_data = create_link_data(
                         link_attrs=link_attrs,
                         keyword=keyword,
@@ -421,11 +384,9 @@ def scrape_target(
             logger.error("Failed to fetch content from %s", url)
             return format_error("fetch_failed", f"Failed to fetch content from {url}")
 
-        # If there was an error during fetching (like robots.txt disallowed)
         if "error" in response:
             return response
 
-        # Anything that is not an error carries content to parse.
         results = parse_content(response["content"], target_config)
         logger.info("Found %d items from %s", len(results), url)
         return {"results": results}
@@ -436,33 +397,13 @@ def scrape_target(
 
 
 def scrape(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Main scraping function that processes all targets in the config."""
-    headers = {"User-Agent": USER_AGENT}
-    timeout = 30
-    retry_count = 3
+    """Scrape the first target in the config, which is the only one a job has."""
+    targets = config.get("targets", [])
+    if not targets:
+        logger.error("No targets specified in config")
+        return format_error("missing_targets", "No targets specified in config")
 
-    try:
-        targets = config.get("targets", [])
-        if not targets:
-            logger.error("No targets specified in config")
-            return format_error("missing_targets", "No targets specified in config")
-
-        # Since we're only processing one target at a time in practice,
-        # we can return the error response directly
-        target = targets[0]
-        logger.info("Processing target: %s", target.get("url"))
-        target_result = scrape_target(target, headers, timeout, retry_count)
-
-        # If there's an error, propagate it up
-        if isinstance(target_result, dict) and "error" in target_result:
-            return target_result
-
-        # If we have results, return them
-        if "results" in target_result:
-            return target_result
-
-        return format_error("unknown_error", "Unknown error occurred during scraping")
-
-    except Exception as e:
-        logger.error("Error in main scrape function: %s", str(e), exc_info=True)
-        return format_error("scraping_error", str(e))
+    logger.info("Processing target: %s", targets[0].get("url"))
+    return scrape_target(
+        targets[0], {"User-Agent": USER_AGENT}, DEFAULT_TIMEOUT, DEFAULT_RETRY_COUNT
+    )

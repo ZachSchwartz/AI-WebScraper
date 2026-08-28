@@ -145,7 +145,8 @@ def queue_manager(monkeypatch):
     """A QueueManager backed by an in-process Redis, polling without delay.
 
     Every QueueManager built while the test runs shares one store, so a service
-    endpoint can construct its own and still see what the test published.
+    endpoint can construct its own and still see what the test published. Time
+    is stubbed out because polling an empty queue would otherwise sleep.
     """
     from util import queue_util
     from util.queue_util import QueueManager
@@ -158,7 +159,6 @@ def queue_manager(monkeypatch):
             lambda cls: fakeredis.FakeRedis(server=server, decode_responses=True)
         ),
     )
-    # Polling an empty queue waits between attempts; no test should wait with it.
     monkeypatch.setattr(queue_util.time, "sleep", lambda seconds: None)
     return QueueManager({"queue_name": "scraped_items"})
 

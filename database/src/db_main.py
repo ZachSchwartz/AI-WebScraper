@@ -3,6 +3,7 @@ Main entry point for the database processor.
 Takes processed items from Redis queue and stores them in SQL database.
 """
 
+from contextlib import contextmanager
 from flask import Flask, request, jsonify
 from db_processor import DatabaseProcessor, ScrapedItem
 
@@ -20,20 +21,27 @@ def health_check():
     return perform_health_check("db_processor", QueueManager.check_connection)
 
 
+@contextmanager
+def query_session():
+    """A session for one read, closed however the request ends."""
+    session = DatabaseProcessor().session()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
 @app.route("/process", methods=["POST"])
 def process_endpoint():
     """API endpoint to trigger queue processing."""
     try:
         job_id = (request.get_json(silent=True) or {}).get("job_id")
-
-        # Initialize Redis connection with this job's processed queue
         queue_util = QueueManager(
             QueueManager.get_redis_config(
                 queue_name="scraped_items_processed", job_id=job_id
             )
         )
 
-        # Initialize database processor
         db_processor = DatabaseProcessor()
         try:
             items = queue_util.process_queue(db_processor.process_item, forward=False)
@@ -50,33 +58,22 @@ def process_endpoint():
 
 @app.route("/query", methods=["GET"])
 def query_items():
-    """Query items by keyword and source URL."""
+    """Query items by keyword and source URL.
+
+    Stored rows are canonicalized on the way in, so the source URL asked about
+    is canonicalized the same way rather than matched character for character.
+    """
     try:
-        # Get query parameters
         keyword = request.args.get("keyword")
-        # Stored rows are canonicalized on the way in, so canonicalize the query
-        # the same way rather than demanding an exact-character match.
         source_url = normalize_url(request.args.get("source_url"))
 
-        # Initialize database session
-        db_processor = DatabaseProcessor()
-        session = db_processor.session()
-
-        try:
-            # Build query
+        with query_session() as session:
             query = session.query(ScrapedItem)
             if keyword:
                 query = query.filter(ScrapedItem.keyword == keyword)
             if source_url:
                 query = query.filter(ScrapedItem.source_url == source_url)
 
-            # Sort by relevance score in descending order
-            query = query.order_by(ScrapedItem.relevance_score.desc())
-
-            # Execute query and get results
-            results = query.all()
-
-            # Convert results to list of dictionaries
             items = [
                 {
                     "id": item.id,
@@ -88,13 +85,10 @@ def query_items():
                     "processed_date": item.processed_date.isoformat(),
                     "raw_data": item.raw_data,
                 }
-                for item in results
+                for item in query.order_by(ScrapedItem.relevance_score.desc()).all()
             ]
 
             return jsonify({"items": items, "count": len(items)})
-
-        finally:
-            session.close()
 
     except Exception as e:
         return jsonify(format_error("db_query_error", str(e))), 500
@@ -104,7 +98,6 @@ def query_items():
 def query_by_href():
     """Query item details by href URL."""
     try:
-        # Get href URL from query parameters
         href_url = normalize_url(request.args.get("href_url"))
 
         if not href_url:
@@ -115,12 +108,7 @@ def query_by_href():
                 400,
             )
 
-        # Initialize database session
-        db_processor = DatabaseProcessor()
-        session = db_processor.session()
-
-        try:
-            # Query for the item with matching href_url
+        with query_session() as session:
             item = (
                 session.query(ScrapedItem)
                 .filter(ScrapedItem.href_url == href_url)
@@ -139,18 +127,14 @@ def query_by_href():
                     404,
                 )
 
-            # Return the relevant information
-            result = {
-                "href_url": item.href_url,
-                "source_url": item.source_url,
-                "keyword": item.keyword,
-                "relevance_score": item.relevance_score,
-            }
-
-            return jsonify(result)
-
-        finally:
-            session.close()
+            return jsonify(
+                {
+                    "href_url": item.href_url,
+                    "source_url": item.source_url,
+                    "keyword": item.keyword,
+                    "relevance_score": item.relevance_score,
+                }
+            )
 
     except Exception as e:
         return jsonify(format_error("db_query_error", str(e))), 500
