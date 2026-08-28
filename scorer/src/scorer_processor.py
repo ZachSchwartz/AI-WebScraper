@@ -9,7 +9,7 @@ import hashlib
 import torch
 import numpy as np
 from typing import Dict, Any, List
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 from sentence_transformers import SentenceTransformer, util
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -192,11 +192,8 @@ class ScorerProcessor:
             # Generate relevance score
             score = self.generate_relevance_score(processed_text, keyword)
 
-            # Get source URL with better fallback handling
             source_url = item.get("source_url", "")
-            href = item.get("href", "")
-            if "http" not in href:
-                href = source_url + href
+            href = urljoin(source_url, item.get("href", ""))
 
             # Add results to item
             processed_item = item.copy()

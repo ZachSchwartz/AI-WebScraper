@@ -5,7 +5,14 @@
 import pytest
 import requests
 import scraper
-from scraper import clean_text, fetch_with_requests, parse_content, process_url, scrape
+from scraper import (
+    clean_text,
+    fetch_with_requests,
+    parse_content,
+    process_url,
+    scrape,
+)
+from util.url_util import normalize_url
 
 HEADERS = {"User-Agent": "test-agent"}
 
@@ -126,3 +133,42 @@ def test_fetch_retries_then_reports_failure(allow_robots, monkeypatch):
 
 def test_scrape_reports_missing_targets():
     assert scrape({"targets": []})["error"] == "missing_targets"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("https://example.com", "https://example.com/"),
+        ("https://example.com/", "https://example.com/"),
+        ("example.com", "https://example.com/"),
+        ("HTTPS://Example.COM/Path", "https://example.com/Path"),
+        ("https://example.com/page#section", "https://example.com/page"),
+        ("https://example.com/search?q=rope", "https://example.com/search?q=rope"),
+        # Not page locations; they must survive untouched.
+        ("mailto:shop@example.com", "mailto:shop@example.com"),
+        ("tel:15550100", "tel:15550100"),
+    ],
+)
+def test_normalize_url_gives_one_page_one_form(raw, expected):
+    assert normalize_url(raw) == expected
+
+
+def test_robots_txt_is_read_from_the_domain_root(monkeypatch):
+    requested = []
+
+    class FakeParser:
+        """Records the robots.txt location without touching the network."""
+
+        def set_url(self, url):
+            requested.append(url)
+
+        def read(self):
+            pass
+
+        def can_fetch(self, user_agent, url):
+            return True
+
+    monkeypatch.setattr(scraper, "RobotFileParser", FakeParser)
+    scraper.is_allowed_by_robots("https://example.com/docs/deep/page", "test-agent")
+
+    assert requested == ["https://example.com/robots.txt"]

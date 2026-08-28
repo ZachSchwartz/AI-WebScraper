@@ -9,6 +9,7 @@ import uuid
 import logging
 import requests
 from flask import Flask, render_template, request, jsonify, abort
+from werkzeug.exceptions import HTTPException
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +21,7 @@ PRODUCER_SERVICE_URL = os.getenv("PRODUCER_SERVICE_URL", "http://producer:5000")
 SCORER_SERVICE_URL = os.getenv("SCORER_SERVICE_URL", "http://scorer:5000")
 DB_SERVICE_URL = os.getenv("DB_SERVICE_URL", "http://db_processor:5000")
 
-SERVICE_TIMEOUT = int(os.getenv("SERVICE_TIMEOUT", "15"))
+SERVICE_TIMEOUT = int(os.getenv("SERVICE_TIMEOUT", "10"))
 
 
 def sort_links(data: dict):
@@ -47,6 +48,18 @@ def create_error_response(error: Exception, status_code: int = 500):
     """Create a standardized error response"""
     logger.error("%s: %s", error.__class__.__name__, str(error))
 
+    if isinstance(error, HTTPException):
+        return (
+            jsonify(
+                {
+                    "error": "query_failed",
+                    "message": error.description,
+                    "status": "error",
+                }
+            ),
+            error.code,
+        )
+
     # Create a user-friendly error message
     if isinstance(error, requests.exceptions.RequestException):
         message = "Unable to complete the request. Please try again later."
@@ -54,7 +67,7 @@ def create_error_response(error: Exception, status_code: int = 500):
         message = str(error)
 
     return (
-        jsonify({"error": "scraping_failed", "message": message, "status": "error"}),
+        jsonify({"error": "query_failed", "message": message, "status": "error"}),
         status_code,
     )
 
@@ -94,10 +107,9 @@ def make_service_request(
 
     logger.info("Service response from %s: %s", url, data)
 
-    # If it's an error response, abort with the error
     if not response.ok or (isinstance(data, dict) and "error" in data):
         abort(
-            response.status_code,
+            response.status_code if not response.ok else 500,
             description=data.get("message", "Service request failed"),
         )
 

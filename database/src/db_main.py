@@ -14,6 +14,7 @@ sys.path.append(root_dir)
 from util.queue_util import QueueManager
 from util.health_util import perform_health_check
 from util.error_util import format_error
+from util.url_util import normalize_url
 
 app = Flask(__name__)
 
@@ -45,7 +46,7 @@ def process_endpoint():
         return jsonify({"message": items})
     except Exception as e:
         return (
-            jsonify(format_error(str(e), "Error storing data in database")),
+            jsonify(format_error("db_process_error", str(e))),
             500,
         )
 
@@ -56,7 +57,9 @@ def query_items():
     try:
         # Get query parameters
         keyword = request.args.get("keyword")
-        source_url = request.args.get("source_url")
+        # Stored rows are canonicalized on the way in, so canonicalize the query
+        # the same way rather than demanding an exact-character match.
+        source_url = normalize_url(request.args.get("source_url"))
 
         # Initialize database session
         db_processor = DatabaseProcessor()
@@ -96,7 +99,7 @@ def query_items():
             session.close()
 
     except Exception as e:
-        return format_error("db_query_error", str(e))
+        return jsonify(format_error("db_query_error", str(e))), 500
 
 
 @app.route("/query/href", methods=["GET"])
@@ -104,10 +107,15 @@ def query_by_href():
     """Query item details by href URL."""
     try:
         # Get href URL from query parameters
-        href_url = request.args.get("href_url")
+        href_url = normalize_url(request.args.get("href_url"))
 
         if not href_url:
-            return jsonify(format_error("href_url parameter is required")), 400
+            return (
+                jsonify(
+                    format_error("missing_parameter", "href_url parameter is required")
+                ),
+                400,
+            )
 
         # Initialize database session
         db_processor = DatabaseProcessor()
@@ -123,7 +131,13 @@ def query_by_href():
 
             if not item:
                 return (
-                    jsonify(format_error("No item found with the specified href URL")),
+                    jsonify(
+                        format_error(
+                            "href_not_found",
+                            "No item found with the specified href URL",
+                            href_url,
+                        )
+                    ),
                     404,
                 )
 
@@ -141,7 +155,7 @@ def query_by_href():
             session.close()
 
     except Exception as e:
-        return format_error("db_query_error", str(e))
+        return jsonify(format_error("db_query_error", str(e))), 500
 
 
 def main() -> None:

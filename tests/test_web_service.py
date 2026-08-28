@@ -5,6 +5,7 @@
 import app as web_app
 import pytest
 import requests
+from werkzeug.exceptions import NotFound
 from app import app, sort_links
 
 
@@ -118,6 +119,20 @@ def test_scrape_endpoint_reports_a_failed_service(client, unavailable_service):
 
     assert response.status_code == 500
     assert response.json["error"] == "scraping_failed"
+
+
+def test_db_query_href_forwards_a_missing_record_as_not_found(client, monkeypatch):
+    def not_found(*args, **kwargs):
+        raise NotFound("No item found with the specified href URL")
+
+    monkeypatch.setattr(web_app, "make_service_request", not_found)
+
+    response = client.get(
+        "/db/query/href", query_string={"href_url": "https://nope.example/missing"}
+    )
+
+    assert response.status_code == 404
+    assert response.json["message"] == "No item found with the specified href URL"
 
 
 def test_db_query_returns_service_unavailable_when_the_db_service_is_down(

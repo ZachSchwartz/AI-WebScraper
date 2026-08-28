@@ -9,13 +9,14 @@ import re
 import logging
 from typing import Dict, List, Any, Optional, Set
 from urllib.robotparser import RobotFileParser
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 import requests
 from bs4 import BeautifulSoup
 
 root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(root_dir)
 from util.error_util import format_error
+from util.url_util import normalize_url
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 def is_allowed_by_robots(url: str, user_agent: str) -> bool:
     """Check if the URL is allowed by robots.txt."""
     rp = RobotFileParser()
-    rp.set_url(url.rstrip("/") + "/robots.txt")
+    rp.set_url(urljoin(url, "/robots.txt"))
     rp.read()
     if not rp.can_fetch(user_agent, url):
         logger.info("Skipping %s (disallowed by robots.txt)", url)
@@ -343,6 +344,9 @@ def scrape_target(
         if not url:
             logger.error("No URL specified in target config")
             return format_error("missing_url", "No URL specified in target config")
+
+        url = normalize_url(url)
+        target_config["url"] = url
 
         logger.info("Fetching content from %s", url)
         response = fetch_with_requests(url, headers, timeout, retry_count)

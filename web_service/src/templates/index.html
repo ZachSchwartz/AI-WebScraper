@@ -241,7 +241,7 @@
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Failed to query database');
+                    throw new Error(data.message || data.error || 'Failed to query database');
                 }
 
                 if (data.items.length === 0) {
@@ -309,7 +309,7 @@
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Failed to query URL');
+                    throw new Error(data.message || data.error || 'Failed to query URL');
                 }
 
                 queryResults.innerHTML = `

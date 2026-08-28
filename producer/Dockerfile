@@ -17,6 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy queue_util.py from root directory
 COPY util/queue_util.py /app/
 COPY util/error_util.py /app/
+COPY util/url_util.py /app/
 
 # Set Python path to include app directory
 ENV PYTHONPATH=/app
