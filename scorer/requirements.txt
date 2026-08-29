@@ -1,15 +1,14 @@
 # Queue
-redis==5.0.1
+redis==8.1.0
 
 # Machine Learning
 # No GPU is exposed to this container, so pull the CPU-only wheels: the default
 # PyPI torch bundles ~2GB of CUDA libraries that can never be used here.
 --extra-index-url https://download.pytorch.org/whl/cpu
-numpy<2.0  # torch 2.2.1 predates the NumPy 2 ABI; the tests stub it out entirely.
-torch==2.2.1+cpu
-transformers==4.38.2
-huggingface_hub>=0.19.3  # Updated to be compatible with transformers 4.38.2
-sentence-transformers>=2.2.2,<3.0.0  # Bounded to match the transformers pin
+numpy==2.5.2
+torch==2.13.0+cpu
+transformers==5.16.1
+sentence-transformers==6.0.0
 
 # Web Framework
 flask==3.1.3

@@ -76,7 +76,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
-      - TRANSFORMERS_CACHE=/app/model_cache
+      # transformers 5 reads the cache location from HF_HOME alone.
       - HF_HOME=/app/model_cache
     volumes:
       # Keeps the downloaded model across rebuilds; everything else is baked in.

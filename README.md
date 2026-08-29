@@ -131,6 +131,16 @@ The scorer service imports `torch` and `sentence-transformers` at module level, 
 Each service is served by gunicorn rather than the Flask development server that `app.run()` starts, and each image's `CMD` sets a worker count and timeout for what that service actually does: the scorer runs a single worker because a second would hold its own copy of the transformer and contend for the same cores, and every timeout is well above gunicorn's 30 second default because these requests drain a queue rather than answer from memory. The web service's is the longest, since it holds one request open across all three pipeline steps.
 
 
+## Front End
+The one page the stack serves carries no build step: it is a Flask template, and
+the Bootstrap stylesheet it uses is vendored under `web_service/src/static/`
+rather than pulled from a CDN, so the page renders the same on a machine with no
+route to the public internet and cannot change under a deployment that did not
+rebuild. Every result the page renders came from a scraped third-party document,
+so it is written into the DOM as text rather than interpolated into markup, and
+a link is only clickable if it is `http` or `https`.
+
+
 ## Storage
 A link is identified by the keyword, the page it was found on, and where it points, and a unique constraint on those three is what keeps a rescrape to one row. Storing a link is an upsert against that constraint rather than a read followed by a write, so two scrapes of the same page running at once cannot both find no existing row and both insert.
 

@@ -52,38 +52,29 @@ def sort_links(data: dict):
 GENERIC_ERROR_MESSAGE = "Unable to complete the request. Please try again later."
 
 
-def create_error_response(error: Exception, status_code: int = 500):
-    """Create a standardized error response.
+def error_response(error: str, message: str, status_code: int):
+    """The one shape every failure this service reports takes."""
+    return (
+        jsonify({"error": error, "message": message, "status": "error"}),
+        status_code,
+    )
+
+
+def create_error_response(exception: Exception, error: str, status_code: int):
+    """Report a failure the request ran into, saying only what the caller may know.
 
     An HTTPException carries a description a downstream service wrote for the
     user, so it is passed on. Anything else is an internal failure whose text
     describes this stack rather than the request, and the caller learns only
     that it failed; the detail goes to the log instead.
     """
-    logger.error("%s: %s", error.__class__.__name__, str(error), exc_info=True)
+    logger.error("%s: %s", exception.__class__.__name__, exception, exc_info=True)
 
-    if isinstance(error, HTTPException):
-        return (
-            jsonify(
-                {
-                    "error": "query_failed",
-                    "message": error.description,
-                    "status": "error",
-                }
-            ),
-            error.code,
-        )
+    message = GENERIC_ERROR_MESSAGE
+    if isinstance(exception, HTTPException) and exception.description:
+        message = exception.description
 
-    return (
-        jsonify(
-            {
-                "error": "query_failed",
-                "message": GENERIC_ERROR_MESSAGE,
-                "status": "error",
-            }
-        ),
-        status_code,
-    )
+    return error_response(error, message, status_code)
 
 
 def make_service_request(
@@ -164,33 +155,23 @@ def scrape():
     Returns:
         tuple: JSON response containing scraped results and HTTP status code
     """
-    logger.info("Received scrape request")
     data = request.get_json(silent=True) or {}
     url = data.get("url")
     keyword = data.get("keyword")
 
     if not url or not keyword:
-        return (
-            jsonify(
-                {
-                    "error": "missing_parameter",
-                    "message": "Both url and keyword are required.",
-                    "status": "error",
-                }
-            ),
-            400,
+        return error_response(
+            "missing_parameter", "Both url and keyword are required.", 400
         )
 
     try:
         url = assert_fetchable(url)
     except UrlNotAllowed as error:
         logger.warning("Rejected scrape of %s: %s", url, error)
-        return (
-            jsonify({"error": "invalid_url", "message": str(error), "status": "error"}),
-            400,
-        )
+        return error_response("invalid_url", str(error), 400)
 
     job_id = str(uuid.uuid4())
+    logger.info("Starting scrape job %s of %s for %s", job_id, url, keyword)
 
     try:
         make_service_request(
@@ -224,30 +205,20 @@ def scrape():
             }
         )
 
-    except HTTPException as e:
-        logger.warning("Pipeline step failed for job %s: %s", job_id, e.description)
-        return (
-            jsonify(
-                {
-                    "error": "scraping_failed",
-                    "message": e.description,
-                    "status": "error",
-                }
-            ),
-            500,
-        )
-    except Exception as e:
-        logger.error("Error in scrape endpoint: %s", str(e), exc_info=True)
-        return (
-            jsonify(
-                {
-                    "error": "scraping_failed",
-                    "message": GENERIC_ERROR_MESSAGE,
-                    "status": "error",
-                }
-            ),
-            500,
-        )
+    except Exception as error:
+        return create_error_response(error, "scraping_failed", 500)
+
+
+def query_failure_status(error: Exception) -> int:
+    """The code a database query that did not answer reports.
+
+    A refusal the database service wrote is the caller's answer, code and all;
+    a service that could not be reached at all is this stack being unavailable
+    rather than the query being wrong.
+    """
+    if isinstance(error, HTTPException):
+        return error.code or 500
+    return 503 if isinstance(error, requests.exceptions.RequestException) else 500
 
 
 def proxy_to_db(endpoint: str):
@@ -256,10 +227,8 @@ def proxy_to_db(endpoint: str):
         return make_service_request(
             DB_SERVICE_URL, endpoint, method="GET", params=request.args
         )
-    except Exception as e:
-        return create_error_response(
-            e, 503 if isinstance(e, requests.exceptions.RequestException) else 500
-        )
+    except Exception as error:
+        return create_error_response(error, "query_failed", query_failure_status(error))
 
 
 @app.route("/db/query")

@@ -2,9 +2,9 @@
 # gates a merge is running the code these images actually ship.
 
 # Database service requirements
-redis==5.0.1
-sqlalchemy==2.0.44
-psycopg2-binary==2.9.9  # PostgreSQL adapter
+redis==8.1.0
+sqlalchemy==2.0.52
+psycopg2-binary==2.9.12  # PostgreSQL adapter
 
 # Web Framework
 flask==3.1.3

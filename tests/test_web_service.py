@@ -2,6 +2,8 @@
 
 # pylint: disable=missing-function-docstring,redefined-outer-name,unused-argument
 
+import re
+
 import app as web_app
 import pytest
 import requests
@@ -238,6 +240,22 @@ def test_the_scrape_is_forwarded_under_its_normalized_url(client, monkeypatch):
 
     assert payloads[0]["url"] == "https://example.com/Guide"
     assert response.json["source_url"] == "https://example.com/Guide"
+
+
+def test_the_page_serves_every_asset_it_needs_itself(client):
+    """A CDN would be a runtime dependency nothing else in the stack has."""
+    page = client.get("/").get_data(as_text=True)
+    assets = re.findall(r"<(?:link|script)[^>]*\s(?:href|src)=\"([^\"]+)\"", page)
+
+    assert assets == ["/static/vendor/bootstrap.min.css"]
+    assert client.get(assets[0]).status_code == 200
+
+
+def test_the_page_never_builds_a_result_out_of_markup(client):
+    """Results carry scraped text, so they are written as nodes rather than HTML."""
+    page = client.get("/").get_data(as_text=True)
+
+    assert "innerHTML" not in page
 
 
 def test_health_reports_the_service_is_up(client):
