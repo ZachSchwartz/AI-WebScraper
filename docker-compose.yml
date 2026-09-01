@@ -1,3 +1,5 @@
+name: ai-webscraper
+
 services:
   redis:
     image: redis:latest

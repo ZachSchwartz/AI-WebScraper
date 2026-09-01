@@ -2,22 +2,73 @@
 
 [![CI](https://github.com/ZachSchwartz/AI-WebScraper/actions/workflows/ci.yml/badge.svg)](https://github.com/ZachSchwartz/AI-WebScraper/actions/workflows/ci.yml)
 
-## Introduction
+Give it a URL and a keyword. It fetches the page, pulls out every link with the
+text around it, scores each link for how well it matches the keyword, and stores
+the ranked result so you can query it later.
 
-This project is designed to allow for web scraping, finding links, and relevance scoring using a combination of Redis, PostgreSQL, and a sentence transformer model. It provides an API that allows users to scrape web pages, analyze extracted links, and query stored data based on relevance to a given keyword. It does all this through an easy to use and understand locally hosted page, that gets run with the program.
+Three Flask services sit behind a queue. The producer scrapes, the scorer ranks
+with a sentence transformer, and the db_processor persists. Redis carries work
+between them, PostgreSQL holds the results, and the whole stack comes up with
+one command.
 
-The system consists of three main components:
+**Stack:** Python 3.14, Flask, Redis, PostgreSQL, SQLAlchemy,
+sentence-transformers (`all-MiniLM-L6-v2`), Docker Compose, gunicorn
 
-- **Producer**: Extracts links and surrounding HTML from the target URL and loads them into a Redis queue.
-- **Scorer**: Uses a sentence transformer model to generate relevance scores by analyzing semantic similarity and keyword context.
-- **Consumer**: Stores the processed data, including URLs, keywords, relevance scores, and metadata, in a PostgreSQL database.
+I used a sentence transformer instead of an LLM because ranking a few hundred
+links per page is an embedding-similarity problem. MiniLM answers it in
+milliseconds on CPU, with no API key and no per-call cost.
 
-The application supports three primary API endpoints:  
-- **Scrape**: Retrieves and processes links from a given URL.  
-- **Query**: Searches stored data for links related to a keyword or source URL.  
-- **Href Query**: Fetches links that were found embedded within other webpages.
+The pipeline runs end to end. The relevance formula has a tuning bug I found
+while documenting it, and [known limitations](#known-limitations) covers what
+it costs and how to fix it.
 
-This README provides setup instructions, API details, and information on how relevance scoring is performed.
+## Quickstart
+
+Needs Docker with Compose v2.
+
+```bash
+./build.sh --build      # macOS and Linux; chmod +x build.sh first
+.\build.bat --build     # Windows
+```
+
+The script starts the stack, opens <http://localhost:8080>, and tears the
+containers down when you press a key. `docker compose up --build` does the
+same thing without the script. The first run downloads the model, so it is
+slow.
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the API reference, configuration,
+and tests.
+
+## What it produces
+
+```bash
+curl -X POST http://localhost:8080/api/scrape \
+  -H 'Content-Type: application/json' \
+  -d '{"url": "https://example.org/docs", "keyword": "authentication"}'
+```
+
+```json
+{
+  "source_url": "https://example.org/docs",
+  "keyword": "authentication",
+  "job_id": "6f1b2c40-9a2e-4f3d-8f1a-7c5d3e9b0a11",
+  "count": 42,
+  "results": [
+    { "url": "https://example.org/docs/authentication", "score": 0.981 },
+    { "url": "https://example.org/docs/api/auth-tokens", "score": 0.974 },
+    { "url": "https://example.org/blog/oauth-in-practice", "score": 0.046 },
+    { "url": "https://example.org/about", "score": 0.011 }
+  ]
+}
+```
+
+The gap between the second and third result comes from the scoring formula, not
+from the data. [How relevance scoring works](#how-relevance-scoring-works)
+explains why.
+
+Two more endpoints search what has been stored: `GET /db/query` by keyword or
+source page, and `GET /db/query/href` by where a link points. The page at
+<http://localhost:8080> runs all three.
 
 ## Architecture
 
@@ -52,186 +103,162 @@ flowchart LR
     PgAdmin -->|"ad hoc SQL"| Postgres
 ```
 
-The web service holds the browser's request open while it drives all three steps in
-order; the numbered calls above happen one after another within a single
-`POST /api/scrape`. See [Known Limitations](#known-limitations) for what that costs.
+The web service holds the browser's request open while it drives all three steps
+in order. The numbered calls above happen one after another inside a single
+`POST /api/scrape`. See [known limitations](#known-limitations) for what that
+costs.
 
-Every scrape gets a `job_id`, and each stage reads and writes queue keys scoped to
-it — `scraped_items:<job_id>` and `scraped_items_processed:<job_id>`. Two scrapes
-running at once therefore cannot consume each other's links. The keys carry an
-expiry, refreshed on every push, so a job that fails partway does not leave its
-items in Redis for good.
+Every scrape gets a `job_id`, and each stage reads and writes queue keys scoped
+to it: `scraped_items:<job_id>` and `scraped_items_processed:<job_id>`. Two
+scrapes running at once therefore cannot consume each other's links. The keys
+carry an expiry that is refreshed on every push, so a job that fails partway
+does not leave its items in Redis for good.
 
-
-## Setup Instructions
-
-### First-Time Setup:
-Clone the Repository off Github
-
-Run to initialize the application and set up the necessary components. Running this with or without the --build flag will open a local host webpage. First time setup will be slow since it will have to install dependencies.
-
-Windows:
-
-```.\build.bat --build```
-
-Mac (first make the script executable with `chmod +x build.sh`):
-
-```./build.sh --build```
-
-
-Subsequent Runs:
-Run to start the application. Each service image carries its own source, so pass
-`--build` after changing any code.
-
-Windows:
-
-```.\build.bat```
-
-Mac:
-
-```./build.sh```
-
-
-Database Deletion:
-To delete the database
-
-Windows:
-
-```.\build.bat --delete_db```
-
-Mac:
-
-```./build.sh --delete_db```
-
-
-### Upgrading an existing database:
-The schema is created from the models if the table is not already there, which means an existing volume keeps whatever it was built with. A database created before the unique constraint on `(keyword, source_url, href_url)` will not gain it; run `--delete_db` once to rebuild.
-
-### Configuration:
-The stack runs out of the box on local development defaults. To change the database or pgAdmin credentials, copy `.env.example` to `.env` and edit it; Docker Compose picks it up automatically. `.env` is gitignored, so your values stay local.
-
-
-## Running the Tests
-The test suite runs outside Docker and needs no model download. Every check below also runs in CI on each push, alongside a build of the service images.
+### Project layout
 
 ```
-pip install -r requirements-dev.txt
-pytest
-black --check database scorer producer util web_service tests
-pylint --disable=import-error database scorer producer util web_service tests
-mypy --ignore-missing-imports database scorer producer util web_service
+producer/     fetches a page and extracts each link with the text around it
+scorer/       embeds that text and scores the link against the keyword
+database/     upserts scored links into PostgreSQL and answers the queries
+web_service/  the public API, the one HTML page, and the pipeline orchestration
+util/         shared by the services: queue draining, URL safety, health checks
+tests/        the pytest suite, which runs outside Docker
 ```
 
-`pytest` reports coverage and fails below 80%; the thresholds live in `pytest.ini`. The database tests run against SQLite, so the upsert that stores a link is built for whichever dialect the engine speaks. The annotations are checked rather than decorative, so `mypy` gates a merge alongside the tests. Redis is stubbed in process with `fakeredis` and the database tests run against SQLite, so no service needs to be up.
+Each service directory holds its own `Dockerfile`, `requirements.txt`, and
+`src/`. Every image is built from the repository root, so a service carries
+`util/` alongside its own source rather than mounting it at run time.
 
-The scorer service imports `torch` and `sentence-transformers` at module level, which together weigh over a gigabyte. Rather than install them to test scoring, `tests/conftest.py` substitutes a deterministic stand-in that embeds text as a hashed bag of words, so cosine similarity still rises with shared vocabulary and the scoring logic is exercised in full.
+## How relevance scoring works
 
+The producer does not hand the scorer a bare URL. It joins the anchor text, the
+link's attributes, the page title and description, the readable words of the URL,
+the text on either side of the link, and the headings above it into one
+`processed_text` that the link is scored on.
 
-## Serving
-Each service is served by gunicorn rather than the Flask development server that `app.run()` starts, and each image's `CMD` sets a worker count and timeout for what that service actually does: the scorer runs a single worker because a second would hold its own copy of the transformer and contend for the same cores, and every timeout is well above gunicorn's 30 second default because these requests drain a queue rather than answer from memory. The web service's is the longest, since it holds one request open across all three pipeline steps.
+Scoring combines three signals, in `scorer/src/scorer_processor.py`:
 
+| Signal | Weight | What it measures |
+| --- | --- | --- |
+| Exact match | 0.5 | The keyword appears in `processed_text` as a substring |
+| Semantic similarity | 0.3 | Cosine similarity between the embedding of the whole text and of the keyword |
+| Context | 0.2 | The best of the keyword's context windows, three words either side of each standalone occurrence |
 
-## Front End
-The one page the stack serves carries no build step: it is a Flask template, and
-the Bootstrap stylesheet it uses is vendored under `web_service/src/static/`
-rather than pulled from a CDN, so the page renders the same on a machine with no
-route to the public internet and cannot change under a deployment that did not
-rebuild. Every result the page renders came from a scraped third-party document,
-so it is written into the DOM as text rather than interpolated into markup, and
-a link is only clickable if it is `http` or `https`.
+Context takes the strongest window rather than the mean, so a link that uses the
+keyword meaningfully once is not diluted by the other places the page mentions
+it in passing. A keyword with no standalone occurrence has no windows, and the
+link scores on similarity alone. Embeddings are cached in memory and on a Docker
+volume, keyed by a hash of the text, so a restart neither re-downloads the model
+nor re-encodes text it has already seen.
 
+Two sigmoids shape the result. Each cosine similarity is squashed with
+`steepness=8` about zero, which spreads the narrow band that real cosine values
+occupy across most of 0 to 1. The weighted sum is then squashed again with
+`steepness=10, midpoint=0.6`:
 
-## Storage
-A link is identified by the keyword, the page it was found on, and where it points, and a unique constraint on those three is what keeps a rescrape to one row. Storing a link is an upsert against that constraint rather than a read followed by a write, so two scrapes of the same page running at once cannot both find no existing row and both insert.
+```python
+score = 0.5 * exact_match + 0.3 * semantic + 0.2 * context
+return sigmoid(score, steepness=10, midpoint=0.6)
+```
 
+That midpoint is a mistake. Without an exact match the context term is
+structurally zero, so the weighted sum cannot exceed 0.3, well below the 0.6
+midpoint. The output is close to bimodal:
 
-## Fetching Safety
-The scraper fetches whatever URL it is handed, which would otherwise make it a way to reach the private network the services run on. `util/url_util.assert_fetchable` resolves each host and refuses anything that is not a public address, so the Redis and Postgres containers, localhost, and the cloud metadata endpoint are all out of reach. Redirects are followed one hop at a time and checked the same way, since a public URL is free to redirect somewhere private. `robots.txt` is honoured before any page is fetched.
+| cosine(text, keyword) | no substring match | substring match |
+| --- | --- | --- |
+| 0.0 | 0.011 | 0.818 |
+| 0.3 | 0.037 | 0.973 |
+| 0.5 | 0.045 | 0.980 |
+| 0.7 | 0.047 | 0.982 |
 
+Semantic similarity separates 0.011 from 0.047 in one tier and 0.973 from 0.982
+in the other. It orders links within a tier, but which tier a link lands in is
+decided entirely by whether the keyword appears literally. The numbers above
+come from evaluating the formula, not from a labeled test set. See
+[known limitations](#known-limitations).
 
-## API Overview
-The application supports three primary API calls:
+## Design notes
 
-### Scrape:
-- Endpoint: http://producer:5000/scrape
+### Fetching safety
 
-- Arguments:
+The scraper fetches whatever URL it is handed, which would otherwise make it a
+way to reach the private network the services run on.
+`util/url_util.assert_fetchable` resolves each host and refuses anything that is
+not a public address, so the Redis and Postgres containers, localhost, and the
+cloud metadata endpoint are all out of reach. Redirects are followed one hop at
+a time and checked the same way, since a public URL is free to redirect
+somewhere private. `robots.txt` is honored before any page is fetched.
 
-  - keyword: The search term.
+### Storage
 
-  - url: The URL to scrape.
+A link is identified by the keyword, the page it was found on, and where it
+points. A unique constraint on those three keeps a rescrape to one row. Storing
+a link is an upsert against that constraint rather than a read followed by a
+write, so two scrapes of the same page running at once cannot both find no
+existing row and both insert.
 
-- Process:
+### Serving
 
-1. The producer retrieves the target URL, extracts all links, and gathers the surrounding HTML data for each link, then is loaded into a Redis queue.
+Each service is served by gunicorn rather than the Flask development server, and
+each image's `CMD` sets a worker count and timeout for what that service does.
+The scorer runs a single worker, because a second would hold its own copy of the
+transformer and contend for the same cores. Every timeout is well above
+gunicorn's 30 second default, because these requests drain a queue rather than
+answer from memory.
 
-2. The scorer module processes the queue, generating a relevance score for how closely each link relates to the keyword, then loads it back into the Redis queue.
+### Front end
 
-3. The consumer stores the URLs, keyword, scores, and additional metadata in a PostgreSQL database.
+The one page the stack serves has no build step. Its Bootstrap stylesheet is
+vendored rather than pulled from a CDN, so the page cannot change under a
+deployment that did not rebuild. Every result on it came from a scraped
+third-party document, so it is written into the DOM as text rather than
+interpolated into markup, and a link is only clickable if it is `http` or
+`https`.
 
-### Query:
-- Arguments:
+## Known limitations
 
-  - keyword: (Optional) The search term.
+These are worth knowing before reading the code. Each one notes the shortest
+path to a fix.
 
-  - source_url: (Optional) The URL to query.
+**The score is close to binary.** The 0.6 midpoint sits above anything the
+formula can reach without an exact keyword match, so a relevant page that
+phrases the topic differently loses to an irrelevant one that merely contains
+the word. The midpoint belongs inside the achievable range. A second bug is
+tangled with it: the exact-match test is a substring, so `cat` matches
+`concatenate`, while the context windows require a whole word, and the two terms
+disagree about what a match is. Retuning without a labeled set would only be
+guessing.
 
-- Process:
+**The pipeline is orchestrated synchronously.** `web_service` calls the three
+services in sequence and holds the HTTP request open for the whole run
+(`PIPELINE_TIMEOUT`, 180s), so the Redis queues decouple the services but not
+the request. The fix is a job-status endpoint that returns the `job_id`
+immediately and lets the page poll while workers drain the queues on their own
+schedule.
 
-1. Searches the database for previously stored data matching the keyword, source URL, or both.
+**One page per scrape.** `scrape()` reads `targets[0]` and ignores the rest, and
+it does not follow the links it finds. There is no crawl depth and no per-domain
+rate limiting beyond `robots.txt`.
 
-2. Returns all related links, sorted by relevance score.
+**There are no migrations.** `ensure_schema` creates the schema from the models
+at startup, but `create_all` skips a table that already exists, so changing a
+column still means recreating the volume. Alembic would make a schema change
+deployable without that.
 
-### Href Query:
-- Arguments:
-  - href_url: a URL found on a previously searched web page.
-- Process:
+**`assert_fetchable` cannot survive DNS rebinding.** The guard resolves a
+hostname, then hands the URL to `requests`, which resolves it again, so a name
+that changes its answer between those two lookups slips past. Closing it means
+pinning the validated address into the connection.
 
-1. Queries the database for links found on webpages (rather than source URLs).
+**Scoring batches within a link, not across them.** `_get_embeddings` sends the
+texts one score needs to the model in a single call, but each link is still
+scored on its own. Batching a whole page would mean a queue contract that hands
+the processor a batch rather than an item, which all three services share.
 
-2. Useful for retrieving embedded or referenced links.
-
-## Link Prioritization
-For the link prioritization task, a sentence transformer was employed to avoid the overhead of a full LLM. After extracting relevant HTML content and metadata, the data is split into strings and stored in a list. The sentence transformer generates embeddings for both the context and the keyword. Using these embeddings, the scorer_processor calculates a relevance score by combining semantic similarity with custom weights.
-
-### The scoring process involves:
-1. Exact Match Bonus: A high weight is assigned if the keyword appears in the text.
-
-2. Semantic Similarity: Embeddings for the text and keyword are compared using cosine similarity to measure their semantic relationship.
-
-3. Context Analysis: When an exact match is found, the words around each standalone occurrence are checked to ensure the keyword is used meaningfully. The strongest of those windows is the one that counts, so a link that uses the keyword well once is not diluted by the places the same page repeats it bare.
-
-4. Weighted Combination: The final score is computed by combining the exact match, semantic similarity, and context scores with weights 0.5, 0.3, and 0.2.
-
-5. Normalization: A sigmoid function is applied to the score to ensure it falls within the 0-1 range and to emphasize differences between scores.
-
-
-## Database Access
-If you wish to access the database to perform your own queries, or check out the raw data stored alongside a link, here are the instructions
-1. Perform the setup instructions
-2. Go to localhost:5050
-3. Sign in with the pgAdmin credentials from your `.env` (defaults: admin@example.com / admin)
-4. Open scraper > databases > scraper > schemas > public > tables > scraped_items
-5. Right click on scraped_items, and select "Query Tool"
-6. You can now run any psql command you'd like on the database
-
-
-## Known Limitations
-
-Worth knowing before reading the code, and the shortest path to fixing each.
-
-**The pipeline is orchestrated synchronously.** `web_service` calls the producer, then the scorer, then the database service in sequence, holding the HTTP request open for the whole run (`PIPELINE_TIMEOUT`, 180s by default). The Redis queues decouple the *services* but not the *request*, so the queue does less work than the architecture suggests. The fix is a job-status endpoint: `/api/scrape` returns its `job_id` immediately, workers drain the queues on their own schedule, and the page polls for results. Celery or RQ would cover it.
-
-**One page per scrape.** `scrape()` reads `targets[0]` and ignores the rest of the list, and it does not follow the links it finds. There is no crawl depth and no per-domain rate limiting beyond `robots.txt`.
-
-**There are no migrations.** The models are now the only definition of the schema and `ensure_schema` creates it at startup, so there is no hand-written DDL left to drift from them. That is not the same as a migration: `create_all` skips a table that already exists, so changing a column still means recreating the volume with `--delete_db`. Alembic would make a schema change deployable without that.
-
-**`assert_fetchable` cannot survive DNS rebinding.** The guard resolves a hostname, then hands the URL to `requests`, which resolves it again. A name that changes its answer between those two lookups slips past. Closing it properly means pinning the validated address into the connection rather than re-resolving.
-
-**Scoring batches within a link, not across them.** `_get_embeddings` sends every text one score needs to the model in a single call, but each link is still scored on its own. Batching a whole page into one `encode` would mean a queue contract that hands the processor a batch rather than an item, which all three services share.
-
-**No authentication or rate limiting.** Every endpoint is open to anyone who can reach the port. That is fine for a local stack and not fine for a deployed one.
-
+**No authentication or rate limiting.** Every endpoint is open to anyone who can
+reach the port. That is fine for a local stack and not fine for a deployed one.
 
 ## License
+
 Released under the [MIT License](LICENSE).
