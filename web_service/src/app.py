@@ -52,6 +52,24 @@ def sort_links(data: dict):
 GENERIC_ERROR_MESSAGE = "Unable to complete the request. Please try again later."
 
 
+def is_refusal(exception: HTTPException) -> bool:
+    """Whether the failure answers the request rather than reporting on us."""
+    return exception.code is not None and 400 <= exception.code < 500
+
+
+class ServiceFailure(HTTPException):
+    """A failure a downstream service reported, under the name it gave it.
+
+    Aborting would keep only the description, which loses the difference
+    between a link that is not stored and a service that is not answering.
+    """
+
+    def __init__(self, code: int, error: str, description: str):
+        super().__init__(description=description)
+        self.code = code
+        self.error = error
+
+
 def error_response(error: str, message: str, status_code: int):
     """The one shape every failure this service reports takes."""
     return (
@@ -63,15 +81,19 @@ def error_response(error: str, message: str, status_code: int):
 def create_error_response(exception: Exception, error: str, status_code: int):
     """Report a failure the request ran into, saying only what the caller may know.
 
-    An HTTPException carries a description a downstream service wrote for the
-    user, so it is passed on. Anything else is an internal failure whose text
+    A refusal a downstream service wrote is the caller's own answer, so its
+    description is passed on. Anything else is an internal failure whose text
     describes this stack rather than the request, and the caller learns only
     that it failed; the detail goes to the log instead.
     """
     logger.error("%s: %s", exception.__class__.__name__, exception, exc_info=True)
 
     message = GENERIC_ERROR_MESSAGE
-    if isinstance(exception, HTTPException) and exception.description:
+    if (
+        isinstance(exception, HTTPException)
+        and exception.description
+        and is_refusal(exception)
+    ):
         message = exception.description
 
     return error_response(error, message, status_code)
@@ -115,9 +137,10 @@ def make_service_request(
     logger.info("Service response from %s: %s", url, data)
 
     if not response.ok or (isinstance(data, dict) and "error" in data):
-        abort(
+        raise ServiceFailure(
             response.status_code if not response.ok else 500,
-            description=data.get("message", "Service request failed"),
+            data.get("error", "service_error"),
+            data.get("message", "Service request failed"),
         )
 
     return data
@@ -221,6 +244,19 @@ def query_failure_status(error: Exception) -> int:
     return 503 if isinstance(error, requests.exceptions.RequestException) else 500
 
 
+def query_failure_error(error: Exception) -> str:
+    """The name a database query that did not answer reports.
+
+    A refusal the database service wrote is the caller's answer, name and all,
+    so a link that is not stored reads differently from a parameter that is
+    missing. An internal failure keeps the generic name, since its own says
+    nothing the caller can act on.
+    """
+    if isinstance(error, ServiceFailure) and is_refusal(error):
+        return error.error
+    return "query_failed"
+
+
 def proxy_to_db(endpoint: str):
     """Pass the request's query parameters through to the database service."""
     try:
@@ -228,7 +264,9 @@ def proxy_to_db(endpoint: str):
             DB_SERVICE_URL, endpoint, method="GET", params=request.args
         )
     except Exception as error:
-        return create_error_response(error, "query_failed", query_failure_status(error))
+        return create_error_response(
+            error, query_failure_error(error), query_failure_status(error)
+        )
 
 
 @app.route("/db/query")

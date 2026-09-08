@@ -47,12 +47,52 @@ def test_process_item_returns_the_item_it_was_given(processor, scored):
 def test_rescraping_a_link_replaces_its_row_rather_than_duplicating_it(
     processor, scored
 ):
-    processor.process_item(scored(score=0.3))
-    processor.process_item(scored(score=0.9))
+    processor.process_item(scored(score=0.3, job_id="job-1"))
+    processor.process_item(scored(score=0.9, job_id="job-2"))
 
     items = stored_items(processor)
     assert len(items) == 1
     assert items[0].relevance_score == 0.9
+
+
+def test_rescraping_a_link_may_lower_its_score(processor, scored):
+    """A page that stops being about the keyword has to be allowed to say so."""
+    processor.process_item(scored(score=0.9, job_id="job-1"))
+    processor.process_item(scored(score=0.3, job_id="job-2"))
+
+    items = stored_items(processor)
+    assert len(items) == 1
+    assert items[0].relevance_score == 0.3
+    assert items[0].job_id == "job-2"
+
+
+@pytest.mark.parametrize("scores", [(0.3, 0.9), (0.9, 0.3)])
+def test_a_link_found_twice_on_a_page_keeps_its_strongest_score(
+    processor, scored, scores
+):
+    """One job collides with itself, and the API reports the strongest score.
+
+    A page can link to the same place from its nav and its body, and each
+    occurrence is scored on different surrounding text. Whichever occurrence
+    drains last must not decide the row, or the stored score disagrees with the
+    one the scrape returned.
+    """
+    for score in scores:
+        processor.process_item(scored(score=score, job_id="job-1"))
+
+    items = stored_items(processor)
+    assert len(items) == 1
+    assert items[0].relevance_score == 0.9
+
+
+def test_a_second_occurrence_scores_a_link_the_scorer_left_unscored(processor, scored):
+    unscored = scored(job_id="job-1")
+    del unscored["relevance_analysis"]["score"]
+
+    processor.process_item(unscored)
+    processor.process_item(scored(score=0.4, job_id="job-1"))
+
+    assert stored_items(processor)[0].relevance_score == 0.4
 
 
 def test_a_different_link_on_the_same_page_gets_its_own_row(processor, scored):

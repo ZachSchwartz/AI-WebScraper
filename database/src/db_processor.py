@@ -109,6 +109,13 @@ class DatabaseProcessor:
         and the collision is settled by the database rather than by reading
         first and writing after: two scrapes of one page running at once would
         both find no existing row and both insert.
+
+        A page is free to link to the same place more than once, and each
+        occurrence is scored on the text around it, so one job collides with
+        itself. The strongest score wins that collision, which is the score the
+        API reports for the link, so the stored row and the response agree. A
+        later job replaces the row outright instead, leaving a rescrape free to
+        lower a score as well as raise it.
         """
         try:
             insert = _UPSERT_INSERT[self.engine.dialect.name]
@@ -127,6 +134,11 @@ class DatabaseProcessor:
                 "raw_data": statement.excluded.raw_data,
                 "processed_date": NOW,
             },
+            where=sa.or_(
+                ScrapedItem.job_id.is_distinct_from(statement.excluded.job_id),
+                ScrapedItem.relevance_score.is_(None),
+                ScrapedItem.relevance_score < statement.excluded.relevance_score,
+            ),
         )
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:

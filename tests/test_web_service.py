@@ -25,6 +25,31 @@ def unavailable_service(monkeypatch):
     monkeypatch.setattr(web_app, "make_service_request", failing)
 
 
+@pytest.fixture
+def db_service_replies(monkeypatch):
+    """Answer the database service's HTTP call with a chosen status and body.
+
+    These go through make_service_request rather than around it, because what
+    is under test is the name the web service gives a downstream refusal.
+    """
+
+    def _replies(status_code, payload):
+        class Response:
+            ok = 200 <= status_code < 300
+
+            def __init__(self):
+                self.status_code = status_code
+
+            def json(self):
+                return payload
+
+        monkeypatch.setattr(
+            web_app.requests, "request", lambda *args, **kwargs: Response()
+        )
+
+    return _replies
+
+
 def test_sort_links_keeps_the_highest_score_per_url():
     data = {
         "message": [
@@ -153,6 +178,39 @@ def test_db_query_href_forwards_a_missing_record_as_not_found(client, monkeypatc
 
     assert response.status_code == 404
     assert response.json["message"] == "No item found with the specified href URL"
+
+
+@pytest.mark.parametrize(
+    "status_code, error, message",
+    [
+        (404, "href_not_found", "No item found with the specified href URL"),
+        (400, "missing_parameter", "href_url parameter is required"),
+    ],
+)
+def test_db_query_href_reports_a_refusal_under_the_name_the_db_service_gave_it(
+    client, db_service_replies, status_code, error, message
+):
+    db_service_replies(status_code, {"error": error, "message": message})
+
+    response = client.get(
+        "/db/query/href", query_string={"href_url": "https://example.com/a"}
+    )
+
+    assert response.status_code == status_code
+    assert response.json["error"] == error
+    assert response.json["message"] == message
+
+
+def test_db_query_keeps_an_internal_failure_generic(client, db_service_replies):
+    db_service_replies(
+        500, {"error": "db_query_error", "message": "relation does not exist"}
+    )
+
+    response = client.get("/db/query", query_string={"keyword": "harness"})
+
+    assert response.status_code == 500
+    assert response.json["error"] == "query_failed"
+    assert "relation" not in response.json["message"]
 
 
 def test_db_query_returns_service_unavailable_when_the_db_service_is_down(

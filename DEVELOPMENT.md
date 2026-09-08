@@ -138,9 +138,9 @@ on.
 | `href_url` | yes | A URL found on a previously scraped page. |
 
 Responds `200` with `href_url`, `source_url`, `keyword`, and `relevance_score`.
-It responds `400 query_failed` if the parameter is absent, `404 query_failed` if
-no such link is stored, and `503 query_failed` if the database service cannot be
-reached.
+It responds `400 missing_parameter` if the parameter is absent,
+`404 href_not_found` if no such link is stored, and `503 query_failed` if the
+database service cannot be reached.
 
 ### GET /health
 
@@ -159,6 +159,9 @@ Every failure takes one shape:
 The message is written for the caller. Internal failures log their detail and
 report a generic message rather than describing this stack to a client.
 
-`/api/scrape` names the failure in `error`. Both query endpoints report
-`query_failed` whatever went wrong, because the web service only proxies them,
-so there the status code and the message carry the meaning.
+A 4xx is the caller's own answer, so it carries the name and the message the
+service that refused it wrote: a link that is not stored reports
+`404 href_not_found` rather than a generic failure. A 5xx describes this stack
+instead, so it reports `query_failed` on the query endpoints and
+`scraping_failed` on `/api/scrape`, with a generic message. The detail goes to
+the log.

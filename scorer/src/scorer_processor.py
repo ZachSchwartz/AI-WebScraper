@@ -6,7 +6,8 @@ with improved caching to prevent repeated downloads.
 import os
 import hashlib
 import logging
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin
 import torch
 import numpy as np
@@ -16,7 +17,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 CONTEXT_WINDOW = 3
+CONTEXT_WEIGHT = 0.5
 MODEL_NAME = "all-MiniLM-L6-v2"
+COSINE_STEEPNESS = 8.0
+COSINE_MIDPOINT = 0.3
+MATCH_BAND = (0.5, 1.0)
+NO_MATCH_BAND = (0.0, 0.5)
+
+_WORD = re.compile(r"\w+")
 
 
 def _sigmoid(value: float, steepness: float, midpoint: float = 0.0) -> float:
@@ -24,17 +32,34 @@ def _sigmoid(value: float, steepness: float, midpoint: float = 0.0) -> float:
     return float(1 / (1 + np.exp(-steepness * (value - midpoint))))
 
 
-def context_windows(text_lower: str, keyword_lower: str) -> List[str]:
-    """The words surrounding each standalone occurrence of the keyword.
+def _band(band: Tuple[float, float], quality: float) -> float:
+    """Place a 0-1 quality inside the range its tier owns."""
+    low, high = band
+    return low + (high - low) * quality
 
-    A keyword that only appears inside a longer word has no window here, so a
-    page that mentions it in passing scores on similarity alone.
+
+def tokenize(text: str) -> List[str]:
+    """The words of a text, lowercased and stripped of the punctuation on them."""
+    return _WORD.findall(text.lower())
+
+
+def context_windows(text: str, keyword: str) -> List[str]:
+    """The words surrounding each occurrence of the keyword, as whole words.
+
+    Both keyword terms of the score read this one scan, so they cannot disagree
+    about what counts as a match: an empty list means the keyword does not
+    appear as a word, which is exactly what the exact-match term tests.
     """
-    words = text_lower.split()
+    words = tokenize(text)
+    keyword_words = tokenize(keyword)
+    span = len(keyword_words)
+    if not span:
+        return []
+
     return [
-        " ".join(words[max(0, index - CONTEXT_WINDOW) : index + CONTEXT_WINDOW + 1])
-        for index, word in enumerate(words)
-        if word == keyword_lower
+        " ".join(words[max(0, index - CONTEXT_WINDOW) : index + span + CONTEXT_WINDOW])
+        for index in range(len(words) - span + 1)
+        if words[index : index + span] == keyword_words
     ]
 
 
@@ -129,10 +154,13 @@ class ScorerProcessor:
     def generate_relevance_score(self, text: str, keyword: str) -> float:
         """Score how relevant the text is to the keyword, between 0 and 1.
 
-        An exact match carries the most weight, then similarity over the whole
-        text, then the best of the keyword's context windows. The strongest
-        context wins, so a link that uses the keyword meaningfully once is not
-        diluted by the other places the same page repeats it.
+        Whether the keyword appears at all decides which half of the range the
+        link lands in, so a link that names the keyword always outranks one
+        that does not. Similarity orders the links within that half: over the
+        whole text on its own for a link with no occurrence, blended with the
+        strongest context window for a link that has them. The strongest window
+        wins rather than the mean, so a link that uses the keyword meaningfully
+        once is not diluted by the other places the same page repeats it.
 
         Args:
             text: Text to analyze
@@ -141,26 +169,26 @@ class ScorerProcessor:
         Returns:
             Score between 0 and 1
         """
-        text_lower = text.lower()
-        keyword_lower = keyword.lower()
-        exact_match = 1.0 if keyword_lower in text_lower else 0.0
-
-        contexts = context_windows(text_lower, keyword_lower) if exact_match else []
+        contexts = context_windows(text, keyword)
         embeddings = self._get_embeddings([text, keyword, *contexts])
         keyword_embedding = embeddings[1]
 
         def similarity(embedding: np.ndarray) -> float:
             return _sigmoid(
-                util.cos_sim(embedding, keyword_embedding).item(), steepness=8
+                util.cos_sim(embedding, keyword_embedding).item(),
+                steepness=COSINE_STEEPNESS,
+                midpoint=COSINE_MIDPOINT,
             )
 
         semantic_score = similarity(embeddings[0])
-        context_score = max(
-            (similarity(embedding) for embedding in embeddings[2:]), default=0.0
-        )
+        if not contexts:
+            return _band(NO_MATCH_BAND, semantic_score)
 
-        score = 0.5 * exact_match + 0.3 * semantic_score + 0.2 * context_score
-        return _sigmoid(score, steepness=10, midpoint=0.6)
+        context_score = max(similarity(embedding) for embedding in embeddings[2:])
+        return _band(
+            MATCH_BAND,
+            (1 - CONTEXT_WEIGHT) * semantic_score + CONTEXT_WEIGHT * context_score,
+        )
 
     def process_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """

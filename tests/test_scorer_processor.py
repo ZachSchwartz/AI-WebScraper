@@ -3,7 +3,7 @@
 # pylint: disable=missing-function-docstring
 
 import pytest
-from scorer_processor import context_windows
+from scorer_processor import MATCH_BAND, context_windows
 
 
 def test_keyword_match_outscores_unrelated_text(scorer_processor):
@@ -15,6 +15,36 @@ def test_keyword_match_outscores_unrelated_text(scorer_processor):
     )
 
     assert matched > unrelated
+
+
+def test_naming_the_keyword_lands_in_the_matched_tier(scorer_processor):
+    score = scorer_processor.generate_relevance_score(
+        "climbing harness buying guide", "harness"
+    )
+
+    assert score >= MATCH_BAND[0]
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["harnesses on sale", "belay devices and carabiners", ""],
+)
+def test_text_without_the_keyword_stays_below_the_matched_tier(scorer_processor, text):
+    score = scorer_processor.generate_relevance_score(text, "harness")
+
+    assert score < MATCH_BAND[0]
+
+
+def test_a_keyword_inside_a_longer_word_does_not_count_as_naming_it(scorer_processor):
+    """The tier boundary answers the same question the context windows do."""
+    inside_a_word = scorer_processor.generate_relevance_score(
+        "reharnessing the climbing rope", "harness"
+    )
+    named = scorer_processor.generate_relevance_score(
+        "reharnessing the climbing harness rope", "harness"
+    )
+
+    assert inside_a_word < MATCH_BAND[0] <= named
 
 
 @pytest.mark.parametrize(
@@ -142,3 +172,19 @@ def test_every_occurrence_gets_its_own_window_to_be_scored_on():
 
 def test_a_keyword_inside_a_longer_word_has_no_context_window():
     assert context_windows("harnesses on sale", "harness") == []
+
+
+def test_punctuation_on_an_occurrence_does_not_hide_it():
+    assert context_windows("buy a harness, then a rope", "harness") == [
+        "buy a harness then a rope"
+    ]
+
+
+def test_a_multi_word_keyword_matches_its_words_in_sequence():
+    assert context_windows("read the api key docs today", "API key") == [
+        "read the api key docs today"
+    ]
+
+
+def test_a_multi_word_keyword_split_across_the_text_does_not_match():
+    assert context_windows("the api rotates a key", "api key") == []
