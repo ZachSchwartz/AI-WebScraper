@@ -1,6 +1,6 @@
 # Development
 
-How to run the stack, call it, and work on it. See the
+How to run the application, for details see the
 [README](README.md) for what it does and how it is built.
 
 ## Setup

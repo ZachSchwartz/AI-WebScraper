@@ -2,15 +2,15 @@
 
 [![CI](https://github.com/ZachSchwartz/AI-WebScraper/actions/workflows/ci.yml/badge.svg)](https://github.com/ZachSchwartz/AI-WebScraper/actions/workflows/ci.yml)
 
-Give it a URL and a keyword. It fetches the page, pulls out every link with the
-text around it, scores each link for how well it matches the keyword, and stores
+Given a URL and a keyword, the application fetches the page, pulls out every link with the
+text around it, scores each link for how well it matches the keyword, then stores
 the ranked result so you can query it later.
 
 <img src="docs/scraper.png" alt="The scraper page: a target URL and keyword, and 118 links from that page ranked by relevance score." width="700">
 
-*118 links off one page, ranked. The gap between 86.1% and 26.1% is the
-[tier boundary](#how-relevance-scoring-works): everything above it names the
-keyword, everything below it is ordered on similarity alone.*
+*118 links off one page, ranked. The gap between 86.1% and 26.1% is
+[the split at 50%](#how-relevance-scoring-works): every link above it contains
+the keyword, every link below it does not.*
 
 Three Flask services sit behind a queue. The producer scrapes, the scorer ranks
 with a sentence transformer, and the db_processor persists. Redis carries work
@@ -24,8 +24,8 @@ I used a sentence transformer instead of an LLM because ranking a few hundred
 links per page is an embedding-similarity problem. MiniLM answers it in
 milliseconds on CPU, with no API key and no per-call cost.
 
-The pipeline runs end to end. [Known limitations](#known-limitations) is honest
-about where it stops.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the API reference, configuration,
+and tests.
 
 ## Quickstart
 
@@ -37,12 +37,8 @@ Needs Docker with Compose v2.
 ```
 
 The script starts the stack, opens <http://localhost:8080>, and tears the
-containers down when you press a key. `docker compose up --build` does the
-same thing without the script. The first run downloads the model, so it is
+containers down when you press a key. The first run downloads the model, so it is quite
 slow.
-
-See [DEVELOPMENT.md](DEVELOPMENT.md) for the API reference, configuration,
-and tests.
 
 ## What it produces
 
@@ -67,9 +63,9 @@ curl -X POST http://localhost:8080/api/scrape \
 }
 ```
 
-The jump between the third and fourth result is the tier boundary at 0.5, not a
-cliff in the data: the first three name the keyword and the fourth does not.
-[How relevance scoring works](#how-relevance-scoring-works) explains the split.
+The jump between the third and fourth result is the split at 0.5, not a cliff in
+the data: the first three contain the keyword and the fourth does not.
+[How relevance scoring works](#how-relevance-scoring-works) explains why.
 
 Two more endpoints search what has been stored: `GET /db/query` by keyword or
 source page, and `GET /db/query/href` by where a link points. The page at
@@ -98,13 +94,11 @@ flowchart LR
 ```
 
 The web service drives all three stages in order inside a single
-`POST /api/scrape`, holding the browser's request open for the whole run. See
-[known limitations](#known-limitations) for what that costs. The same service
+`POST /api/scrape`, holding the browser's request open for the whole run. The same service
 proxies `GET /db/query` straight to `db_processor`.
 
 Every scrape gets a `job_id`, and each stage reads and writes queue keys scoped
-to it: `scraped_items:<job_id>` and `scraped_items_processed:<job_id>`. Two
-scrapes running at once therefore cannot consume each other's links. The keys
+to it: `scraped_items:<job_id>` and `scraped_items_processed:<job_id>`. The keys
 carry an expiry that is refreshed on every push, so a job that fails partway
 does not leave its items in Redis for good.
 
@@ -130,14 +124,20 @@ link's attributes, the page title and description, the readable words of the URL
 the text on either side of the link, and the headings above it into one
 `processed_text` that the link is scored on.
 
-Scoring is tiered, in `scorer/src/scorer_processor.py`. Whether the keyword
-appears in `processed_text` as a whole word decides which half of the range a
-link lands in, and similarity orders the links inside that half:
+The score has two halves, and one question decides which half a link lands in:
+does the keyword appear in `processed_text` as a whole word?
 
-| Tier | Range | Ordered within the tier by |
-| --- | --- | --- |
-| Keyword appears as a word | 0.5 to 1.0 | Equal parts whole-text similarity and the strongest context window |
-| Keyword does not appear | 0.0 to 0.5 | Whole-text similarity alone |
+- **Yes** — the link scores between 0.5 and 1.0.
+- **No** — the link scores between 0.0 and 0.5.
+
+So a link that contains the keyword always outranks one that does not, however
+similar the second one looks. A page that never says the word is usually not
+about it, embeddings are good at
+ranking pages that are already close to each other, and much weaker at deciding
+whether a page belongs at all.
+
+Similarity then orders the links inside each half, in
+`scorer/src/scorer_processor.py`:
 
 ```python
 contexts = context_windows(text, keyword)
@@ -146,27 +146,25 @@ if not contexts:
 return _band(MATCH_BAND, 0.5 * semantic_score + 0.5 * context_score)
 ```
 
-The split is deliberate. A page that never names the keyword is usually not
-about it, so the gate is the signal worth trusting most, and embedding
-similarity is better at ranking near-neighbors than at deciding whether a link
-belongs at all. Banding rather than weighting keeps that decision legible: the
-boundary is one number to move, and each tier still spreads across its whole
-range instead of collapsing onto the flat end of a curve.
+A link with no occurrence of the keyword is ranked on how close its whole text
+is to the keyword, and nothing else. A link that does contain the keyword is
+ranked on that, averaged with its best occurrence: the seven words around each
+place the keyword appears are scored on their own, and only the strongest one
+counts, so a link that uses the keyword meaningfully once is not dragged down by
+the other places the page mentions it in passing.
 
-Because the gate carries that much, both keyword terms read one scan of the
-text. `context_windows` tokenizes on `\w+`, so punctuation does not hide an
-occurrence and a keyword sitting inside a longer word does not count as one, and
-the exact-match test is simply whether that scan found anything. A multi-word
-keyword matches its words in sequence. Context takes the strongest window rather
-than the mean, so a link that uses the keyword meaningfully once is not diluted
-by the other places the page mentions it in passing.
+One scan of the text answers both questions, where the keyword is and therefore
+whether it is there at all, so the two cannot disagree. It splits on `\w+`, which
+means punctuation does not hide an occurrence, `cat` does not count as an
+occurrence of `concatenate`, and a keyword of several words has to appear as
+those words in order.
 
-Each cosine similarity is squashed with `_sigmoid(cos, steepness=8,
-midpoint=0.3)`. The midpoint is the middle of the band MiniLM's cosines actually
-occupy for a short keyword against a paragraph, so the curve spreads that band
-rather than saturating above it:
+Closeness is cosine similarity between two embeddings. For a one-word keyword
+against a paragraph that lands in a narrow band near 0.3 rather than spreading
+across 0 to 1, so `_sigmoid(cos, steepness=8, midpoint=0.3)` stretches the band
+back out, centered on 0.3 so a typical similarity comes out mid-scale:
 
-| cosine(text, keyword) | no occurrence | occurrence |
+| cosine similarity | keyword absent | keyword present |
 | --- | --- | --- |
 | 0.0 | 0.042 | 0.542 |
 | 0.2 | 0.155 | 0.655 |
@@ -174,7 +172,7 @@ rather than saturating above it:
 | 0.5 | 0.416 | 0.916 |
 | 0.7 | 0.480 | 0.980 |
 
-The right column takes the best context window as scoring like the whole text.
+The right column takes the best occurrence as scoring like the whole text.
 
 Embeddings are cached in memory and on a Docker volume, keyed by a hash of the
 text, so a restart neither re-downloads the model nor re-encodes text it has
@@ -184,50 +182,63 @@ already seen.
 
 ### Fetching safety
 
-The scraper fetches whatever URL it is handed, so
-`util/url_util.assert_fetchable` resolves each host and refuses anything that is
-not a public address: the Redis and Postgres containers, localhost, and the
-cloud metadata endpoint are all out of reach. Redirects are checked one hop at a
-time, since a public URL is free to redirect somewhere private, and `robots.txt`
-is honored before any fetch. The guard is not airtight. It resolves the hostname
-and `requests` then resolves it again, so a name that changes its answer between
-the two lookups slips past.
+The scraper fetches whatever URL it is handed, from inside a private network
+where `http://redis:6379`, `localhost`, and a cloud metadata endpoint are all
+reachable. That is server-side request forgery: the caller cannot reach those
+addresses, but this service can.
+
+`util/url_util.assert_fetchable` resolves the host first and refuses any address
+Python does not consider global, covering loopback, private ranges, and
+link-local in one test rather than a blocklist. A public URL can still redirect
+somewhere private, so the producer follows redirects itself and checks each hop.
+`robots.txt` is honored before any fetch, which is courtesy rather than defense.
+
+It isn't airtight, `requests` resolves the name a second time when it connects,
+so a host that changes its answer between the two lookups gets through.
 
 ### Storage
 
-A link is identified by the keyword, the page it was found on, and where it
-points, with a unique constraint on those three. Storing a link is an upsert
-against that constraint rather than a read followed by a write, so two scrapes
-of the same page cannot both find no existing row and both insert.
+Two scrapes of one page for one keyword should leave one row. Checking whether
+that row exists and then inserting leaves a window: both scrapes look, both see
+nothing, both insert.
+
+A link is identified by its keyword, source page, and destination, and a unique
+constraint on those three moves that identity into the database. One upsert
+settles the collision inside a single statement, with no window to interleave. A
+page can link to the same place twice, so within a scrape the strongest score
+wins, matching what the API returns; a later scrape replaces the row outright.
 
 ### Serving
 
-Each service runs under gunicorn rather than the Flask development server, with
-a worker count and timeout set per service. The scorer runs a single worker,
-because a second would hold its own copy of the transformer and contend for the
-same cores. Timeouts sit well above gunicorn's 30 second default, since these
-requests drain a queue rather than answer from memory.
+Each service runs under gunicorn with its own worker count and timeout, set well
+above the 30 second default that would otherwise kill a worker mid-scrape. The
+scorer runs a single worker, each is a separate process holding its own copy of
+the model, so a second would double the memory and then contend for the same
+cores.
 
 ### Front end
 
-The one page the stack serves has no build step, and its Bootstrap stylesheet is
-vendored rather than pulled from a CDN. Every result on it came from a scraped
-third-party document, so it is written into the DOM as text rather than
-interpolated into markup, and a link is only clickable if it is `http` or
-`https`.
+Every URL and every word on the results page came out of a third-party document,
+so anchor text reading `<script>...</script>` would run in the user's browser and
+an `href` of `javascript:...` would run on click.
+
+Results are written with `textContent`, which sets text and never markup;
+`innerHTML` appears nowhere in the file. A result is clickable only when its
+scheme is `http` or `https`. Bootstrap is vendored rather than pulled from a
+CDN, and the page has no build step.
 
 ## Known limitations
 
 These are worth knowing before reading the code. Each one notes the shortest
 path to a fix.
 
-**The tier boundary is unforgiving, and none of it is calibrated.** The gate
-matches whole words only, so `harnesses` does not count as `harness` and a page
-that consistently uses the plural drops a whole tier. Stemming the keyword and
+**The keyword test is unforgiving, and none of it is calibrated.** It matches
+whole words only, so `harnesses` does not count as `harness` and a page that
+consistently uses the plural drops into the lower half. Stemming the keyword and
 the text together would close that. The two constants that shape everything
-else, the 0.5 boundary and the 0.3 cosine midpoint, were picked from the shape
-of the cosine distribution rather than from a labeled set, so the ordering is
-reasonable but the numbers are not evidence.
+else, the 0.5 split and the 0.3 the similarity curve is centered on, were picked
+from the shape of the similarity distribution rather than from a labeled set, so
+the ordering is reasonable but the numbers are not evidence.
 
 **The pipeline is orchestrated synchronously.** `web_service` calls the three
 services in sequence and holds the HTTP request open for the whole run
